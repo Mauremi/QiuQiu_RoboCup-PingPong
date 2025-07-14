@@ -34,7 +34,7 @@ using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
 
 enum Logger {Info, Error, Move, Hint, Input};
-void logger(Logger l, const char* content = nullptr) {
+void logger(Logger l, const char* content = "") {
     switch (l) {
     case Info:
         std::cout << "\t[Info]  " << content; break;
@@ -48,14 +48,14 @@ void logger(Logger l, const char* content = nullptr) {
         printf("\t\033[0m\033[1;36m[Hint]  %s\033[0m", content); break;
     }
 
-    if (content) {
+    if (content != "") {
 		std::cout << std::endl;
     }
 }
 
 template <class T>
-T std_in(T& variable, const char* hint = nullptr) {
-    if (hint) {
+T std_in(T& variable, const char* hint = "") {
+    if (hint != "") {
         logger(Hint, hint);
     }
 
@@ -71,11 +71,11 @@ T std_in(T& variable, const char* hint = nullptr) {
 #define BALL_DELTA_Y 0
 #define TABLE_LENGTH 2740
 #define TABLE_WIDTH 1525
-#define GATE_WIDTH 80
-#define GATE_THICKNESS 20
+#define GOAL_WIDTH 80
+#define GOAL_THICKNESS 20
 #define BALL_WIDTH 0 // FIX
 
-std::map<int, std::tuple<double, double, int>> gates = {
+std::map<int, std::tuple<double, double, int>> goals = {
     {1, {TABLE_LENGTH,  710, 6}},
     {2, {TABLE_LENGTH,  540, 5}},
     {3, {TABLE_LENGTH,  360, 5}},
@@ -88,7 +88,7 @@ std::map<int, std::tuple<double, double, int>> gates = {
 };  // 目标门的序号及对应的坐标和分数
 
 struct Config {
-    const char *jaka_ip = "192.168.1.112"; // jaka机器人ip
+    const char *jaka_ip = "192.168.1.10"; // jaka机器人ip
 	const int motor_com = 9; // 电机的COM口
     const char* csv_path = "C:\\Robot\\2025PingPangCampus\\QiuQiuPingPang_allCodes\\campus_example\\pingpong_trajectory.csv";
 
@@ -133,23 +133,23 @@ double goAvalue(double ball_x, double ball_y, double posi_x, double posi_y)
 }
 
 // 判断球是否能穿过该门，
-bool can_pass_gate(double ball_x, double ball_y, double gate_x, double gate_y) {
-    double dx = gate_x - ball_x;
+bool can_pass_goal(double ball_x, double ball_y, double goal_x, double goal_y) {
+    double dx = goal_x - ball_x;
     if (fabs(dx) < 1e-5) 
     {
-        logger(Error, "Ball_x == gate_x.");
+        logger(Error, "Ball_x == goal_x.");
         return false;  // 避免除以0
     }
-    double dy = gate_y - ball_y;
+    double dy = goal_y - ball_y;
     double slope = dy / dx;
-    double y_at_gate = ball_y + slope * (dx - GATE_THICKNESS);
-    bool can = fabs(y_at_gate - gate_y) <= GATE_WIDTH / 2;
+    double y_at_goal = ball_y + slope * (dx - GOAL_THICKNESS);
+    bool can = fabs(y_at_goal - goal_y) <= GOAL_WIDTH / 2;
     if (can) {
-        logger(Info, "This door could be passed through.");
+        logger(Info, "This goal could be passed through.");
         return true;
     }
     else {
-        logger(Info, "This door can not be passed through.");
+        logger(Info, "This goal can not be passed through.");
         return false;
     }
 }
@@ -173,14 +173,14 @@ void add_delta(int id, double ball_y, Point& target) {
 // 基于目标门的位置和得分，自动选择合适的目标门
 Point choice(double ball_x, double ball_y) {
     Point ball{ ball_x, ball_y, 0, 0, 0 };
-    int best_gate = -1;
+    int best_goal = -1;
     int best_score = -1;
     double min_center_dist = 1e9;
     Point target;
 
     logger(Info, "Start choosing a target.");
 
-    for (std::map<int, std::tuple<double, double, int>>::const_iterator it = gates.begin(); it != gates.end(); ++it) {
+    for (std::map<int, std::tuple<double, double, int>>::const_iterator it = goals.begin(); it != goals.end(); ++it) {
         // 遍历所有目标
         int id = it->first;
         double gx = std::get<0>(it->second);
@@ -190,7 +190,7 @@ Point choice(double ball_x, double ball_y) {
         logger(Info);
         std::cout << "Considering target (" << gx << ", " << gy << ").\n";
         
-        if (!can_pass_gate(ball_x, ball_y, gx, gy)) continue;
+        if (!can_pass_goal(ball_x, ball_y, gx, gy)) continue;
 
         bool prefer_direction = (ball_y > 0 && gy < 0) || (ball_y < 0 && gy > 0);
 
@@ -199,24 +199,24 @@ Point choice(double ball_x, double ball_y) {
             if (score > best_score || (score == best_score && fabs(gy) < min_center_dist)) {
                 best_score = score;
                 min_center_dist = fabs(gy);
-                best_gate = id;
+                best_goal = id;
                 target.x = gx;
                 target.y = gy;
                 logger(Info);
-                std::cout << "Target changed. Target ID " << best_gate << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
+                std::cout << "Target changed. Target ID " << best_goal << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
             }
             else {
-                logger(Info, "Not a good door.");
+                logger(Info, "Not a good goal.");
             }
         }
         else {
-            logger(Info, "Not in good direction. Not a good door.");
+            logger(Info, "Not in good direction. Not a good goal.");
         }
     }
 
-    if (best_gate == -1) {
-        logger(Info, "No door fits requirement. Lower the limit.");
-        for (std::map<int, std::tuple<double, double, int>>::const_iterator it = gates.begin(); it != gates.end(); ++it) {/////////////////
+    if (best_goal == -1) {
+        logger(Info, "No goal fits requirement. Lower the limit.");
+        for (std::map<int, std::tuple<double, double, int>>::const_iterator it = goals.begin(); it != goals.end(); ++it) {/////////////////
             // 遍历所有目标
             int id = it->first;
             double gx = std::get<0>(it->second);
@@ -226,39 +226,39 @@ Point choice(double ball_x, double ball_y) {
             logger(Info);
             std::cout << "Considering target (" << gx << ", " << gy << ").\n";
 
-            if (!can_pass_gate(ball_x, ball_y, gx, gy)) continue;
+            if (!can_pass_goal(ball_x, ball_y, gx, gy)) continue;
 
             if (score > best_score || (score == best_score && fabs(gy) < min_center_dist)) {
                 best_score = score;
                 min_center_dist = fabs(gy);
-                best_gate = id;
+                best_goal = id;
                 target.x = gx;
                 target.y = gy;
                 logger(Info);
-                std::cout << "Target changed. Target ID " << best_gate << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
+                std::cout << "Target changed. Target ID " << best_goal << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
             }
             else
             {
-                logger(Info, "Not a good door.");
+                logger(Info, "Not a good goal.");
             }
         }
     }
 
-    if (best_gate == -1) {  // 找不到门，默认打5
-        logger(Error, "Not valid door. Default: Door 5.");
-        best_gate = 5;
-        target.x = std::get<0>(gates[5]);
-        target.y = std::get<1>(gates[5]);
+    if (best_goal == -1) {  // 找不到门，默认打5
+        logger(Error, "Not valid goal. Default: Goal 5.");
+        best_goal = 5;
+        target.x = std::get<0>(goals[5]);
+        target.y = std::get<1>(goals[5]);
     }
 
-    if (config.if_add_delta) add_delta(best_gate, ball_y, target);
+    if (config.if_add_delta) add_delta(best_goal, ball_y, target);
 
     return target;
 }
 
 void record_trajectory() {
     // 打开CSV文件（每次打开时清空内容，如果文件不存在则会创建）
-    std::ofstream outfile("pingpong_trajectory.csv", std::ios::trunc); // trunc模式会覆盖文件内容
+    std::ofstream outfile(config.csv_path, std::ios::trunc); // trunc模式会覆盖文件内容
     logger(Info);
     std::cout << "CSV path: " << config.csv_path << "\n";
 
@@ -292,7 +292,7 @@ void record_trajectory() {
         }
 
         // 检查球是否超出球桌范围
-        if (fabs(ball_x) > TABLE_LENGTH - 300 || fabs(ball_y) > TABLE_WIDTH - 30) {
+        if (fabs(ball_x) > TABLE_LENGTH - 150 || fabs(ball_y) > TABLE_WIDTH - 30) {
             logger(Info, "Recording stop.");
             break;  // 如果球超出球桌范围，停止记录
         }
@@ -314,7 +314,6 @@ void record_trajectory() {
     outfile.close();  // 关闭文件
     logger(Info, "Close file.");
 }
-
 
 JAKAZuRobot demo;
 MotorIK mkmotor;
@@ -451,7 +450,6 @@ int main()
     }
     return 0;
 }
-
 
 // 函数：持续接收视觉数据
 void getVision()

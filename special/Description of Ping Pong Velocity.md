@@ -1,0 +1,3 @@
+When a ball is hit, we assume that its initial velocity is $v_0$, and we know that it is not scrolling then. Assume that the friction is $f$, which is not a constant. Thus, we have the following equations $$\begin{cases}f\cdot r = \mathscr J\cdot\beta\\f=-ma\end{cases}$$that is$$v'=\frac57v_0$$
+
+Further, if $v_0$ is precisely twice the speed of the paddle, $$v'=\frac5{14}v_\mathrm p=\frac5{14}\omega_\mathrm pr_\mathrm p$$But generally, the speed of the ball is **proportional to** the motor speed.
