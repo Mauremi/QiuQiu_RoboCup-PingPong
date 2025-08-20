@@ -26,14 +26,15 @@
 #include <fstream>
 #include <complex>
 #include <conio.h> // Windows specific
-
+#include <list>
 #include <mmsystem.h>
+#include <queue>
 
 using namespace std;
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
 
-enum Logger {Info, Error, Move, Hint, Input};
+enum Logger { Info, Error, Move, Hint, Input };
 void logger(Logger l, const char* content = "") {
     switch (l) {
     case Info:
@@ -49,7 +50,7 @@ void logger(Logger l, const char* content = "") {
     }
 
     if (content != "") {
-		std::cout << std::endl;
+        std::cout << std::endl;
     }
 }
 
@@ -65,36 +66,57 @@ T std_in(T& variable, const char* hint = "") {
     return variable;
 }
 
-#define HEIGHT_LEFT  245
-#define HEIGHT_RIGHT 238
-#define BALL_DELTA_X 0
-#define BALL_DELTA_Y 0
 #define TABLE_LENGTH 2740
 #define TABLE_WIDTH 1525
 #define GOAL_WIDTH 80
 #define GOAL_THICKNESS 20
 #define BALL_WIDTH 0 // FIX
+#define VISUAL_BOARDER 762.5  // real boarder of visual system // FIX
 
 std::map<int, std::tuple<double, double, int>> goals = {
-    {1, {TABLE_LENGTH,  710, 6}},
-    {2, {TABLE_LENGTH,  540, 5}},
-    {3, {TABLE_LENGTH,  360, 5}},
-    {4, {TABLE_LENGTH,  180, 4}},
-    {5, {TABLE_LENGTH,    0, 4}},
-    {6, {TABLE_LENGTH, -180, 4}},
-    {7, {TABLE_LENGTH, -360, 5}},
-    {8, {TABLE_LENGTH, -540, 5}},
-    {9, {TABLE_LENGTH, -710, 6}},
-};  // 目标门的序号及对应的坐标和分数
+    {1, {TABLE_LENGTH - GOAL_THICKNESS,  725, 6}},
+    {2, {TABLE_LENGTH - GOAL_THICKNESS,  540, 5}},
+    {3, {TABLE_LENGTH - GOAL_THICKNESS,  360, 5}},
+    {4, {TABLE_LENGTH - GOAL_THICKNESS,  180, 4}},
+    {5, {TABLE_LENGTH - GOAL_THICKNESS,    0, 4}},
+    {6, {TABLE_LENGTH - GOAL_THICKNESS, -180, 4}},
+    {7, {TABLE_LENGTH - GOAL_THICKNESS, -360, 5}},
+    {8, {TABLE_LENGTH - GOAL_THICKNESS, -540, 5}},
+    {9, {TABLE_LENGTH - GOAL_THICKNESS, -725, 6}},
+};
+// No, x, y, score
 
 struct Config {
-    const char *jaka_ip = "192.168.1.10"; // jaka机器人ip
-	const int motor_com = 9; // 电机的COM口
-    const char* csv_path = "C:\\Robot\\2025PingPangCampus\\QiuQiuPingPang_allCodes\\campus_example\\pingpong_trajectory.csv";
+    // config
+    const char* jaka_ip = "192.168.1.100"; // jaka mini ip
+    int motor_com = 10; // COM port for the motor
+    const char* csv_path = "C:\\Robot\\2025PingPongCampus\\codes\\special\\goal_trajectory.csv";
 
-    const bool if_add_delta = true; // 是否对两侧门增加偏移
-    const double speed = 900; // 电机击球速度
-    const bool if_record_trajectory = true; // 是否记录轨迹
+    // motor speed
+    const double speed = 740; // Motor hitting speed
+
+    // paddle position
+    const double paddle_z_left = 240, paddle_z_right = 240; // Paddle heights for left and right sides
+    const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
+
+    // jaka mini position
+    const bool if_jaka_offset = false;
+    const double jaka_offset_x = 0;
+    const double jaka_offset_y = 0;
+    double jaka_angle_left, jaka_angle_right;
+
+    // IFs
+    const bool if_add_delta = false; // If add offset for side goals
+    const bool if_record_trajectory = true; // If record trajectory
+    const bool if_vision_correction = false;
+    const bool if_modify_goal = false;
+
+    // Adjacent learning
+    const bool if_adjacent_learning = true; // If use adjacent learning
+    const int offset_class = 1; // 1: , 2: Exponential
+    const double correction_coefficient = 0.8;
+    const int deviser_x = 500, deviser_y = 1000; // Deviser for adjacent learning, used to calculate the distance
+
 } config;
 
 struct Point
@@ -102,59 +124,146 @@ struct Point
     double x;
     double y;
     double t;  // time
-    double vx; // x方向速度
-    double vy; // y方向速度
+    double vx;
+    double vy;
 };
 
-// 全局变量，用于存储球的位置和管理线程
-Point ballPos;         // 球的位置
-std::mutex mtx;        // 互斥锁，用于保护共享资源的访问
+class AdjacentLearning
+{
+    struct Offset
+    {
+        Point center; // Center of the offset
+        double y_offset;
+    };
+    list<Offset> offsets_; // List of offsets for adjacent learning
+public:
+    AdjacentLearning() = default;
+    ~AdjacentLearning() = default;
 
-void getVision();
+    // Add an offset for adjacent learning
+    void add_offset(const double x, const double y, const double y_offset) {
+        const Offset offset{ {x, y, 0, 0, 0}, y_offset };
+        offsets_.push_back(offset);
+    }
 
-// 计算击球角度
+    // Get the offset for a specific position
+    double get_offset(const double x, const double y) const {
+        double offset_sum = 0.0;
+        int index = 0;
+        for (const auto& offset : offsets_) {
+            index++;
+            switch (config.offset_class)
+            {
+            case 1:
+                offset_sum += config.correction_coefficient * offset.y_offset * exp(-sqrt(pow((x - offset.center.x) / config.deviser_x, 2) + pow((y - offset.center.y) / config.deviser_y, 2))); break;
+            case 2: default:
+                offset_sum += config.correction_coefficient * offset.y_offset * exp(-(pow((x - offset.center.x) / config.deviser_x, 2) - pow((y - offset.center.y) / config.deviser_y, 2))); break;
+            }
+        }
+        logger(Info);
+        std::cout << index << " offsets.\n";
+        return offset_sum;
+    }
+} learning;
+
+class LinearPredictor
+{
+    double slope;     // Slope of the line
+    double intercept; // Y-intercept of the line
+    // Y = slope * X + intercept
+public:
+    LinearPredictor(const std::vector<Point>& points)
+    {
+        // Based on series of points, calculate the slope and intercept for linear regression
+        double sum_x = 0, sum_y = 0, sum_xx = 0, sum_xy = 0;
+        int n = points.size();
+
+        for (const auto& point : points)
+        {
+            sum_x += point.x;
+            sum_y += point.y;
+            sum_xx += point.x * point.x;
+            sum_xy += point.x * point.y;
+        }
+
+        // Calculate slope and y-intercept
+        slope = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x);
+        intercept = (sum_y - slope * sum_x) / n;
+    }
+
+    LinearPredictor(std::queue<Point>& points)
+    {
+        // Based on series of points, calculate the slope and intercept for linear regression
+        double sum_x = 0, sum_y = 0, sum_xx = 0, sum_xy = 0;
+        int n = points.size();
+
+        while (points.size() > 0)
+        {
+            Point point = points.front();
+            points.pop();
+            sum_x += point.x;
+            sum_y += point.y;
+            sum_xx += point.x * point.x;
+            sum_xy += point.x * point.y;
+        }
+
+        // Calculate slope and y-intercept
+        slope = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x);
+        intercept = (sum_y - slope * sum_x) / n;
+    }
+
+    double predict(double x)
+    {
+        // Predict y value for given x
+        return slope * x + intercept;
+    }
+};
+
+Point ball_position;         // location of the ball
+int balls_n;
+Point hitting_position;
+char cmd = 'H'; // Command for the robot
+
+std::mutex mtx;        // mutex for protecting shared resources
+
+void getVision();      // Function to get vision data
+
+// calculate the angle to hit the ball
 double goAvalue(double ball_x, double ball_y, double posi_x, double posi_y)
 {
-    std::cout << std::endl << "==== 角度计算调试信息 ====" << std::endl;
-    std::cout << "球的位置: (" << ball_x << ", " << ball_y << ")" << std::endl;
-    std::cout << "目标位置: (" << posi_x << ", " << posi_y << ")" << std::endl;
-
     double run_x = posi_x - ball_x;
     double run_y = posi_y - ball_y;
-    std::cout << "X方向距离: " << run_x << " mm" << std::endl;
-    std::cout << "Y方向距离: " << run_y << " mm" << std::endl;
 
     double angle_rad = atan2(run_y, run_x);
     double angle_deg = angle_rad * Rad2Deg;
-    std::cout << "计算得到角度: " << angle_deg << " 度" << std::endl;
-    std::cout << "========================" << std::endl << std::endl;
 
-    return angle_deg;
+    logger(Info);
+    std::cout << "Calculated angle: " << angle_deg << " degrees." << std::endl;
+
+    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
 }
 
-// 判断球是否能穿过该门，
+// check if the ball can pass through the goal
 bool can_pass_goal(double ball_x, double ball_y, double goal_x, double goal_y) {
     double dx = goal_x - ball_x;
-    if (fabs(dx) < 1e-5) 
+    if (fabs(dx) < 1e-5)
     {
         logger(Error, "Ball_x == goal_x.");
-        return false;  // 避免除以0
+        return false;  // avoid division by zero
     }
     double dy = goal_y - ball_y;
     double slope = dy / dx;
     double y_at_goal = ball_y + slope * (dx - GOAL_THICKNESS);
     bool can = fabs(y_at_goal - goal_y) <= GOAL_WIDTH / 2;
     if (can) {
-        logger(Info, "This goal could be passed through.");
         return true;
     }
     else {
-        logger(Info, "This goal can not be passed through.");
         return false;
     }
 }
 
-// 如果是两侧的两个门，增加偏移，与y坐标成正比
+// If the goal is on the sides, add an offset based on the y coordinate
 void add_delta(int id, double ball_y, Point& target) {
     switch (id) {
     case 1:
@@ -165,12 +274,12 @@ void add_delta(int id, double ball_y, Point& target) {
     case 9:
         target.y -= fabs(ball_y) / TABLE_WIDTH * 2.0 * 10;
         logger(Info);
-        std::cout << "Add offset: " << - fabs(ball_y) / TABLE_WIDTH * 2.0 * 10 << " mm.\n";
+        std::cout << "Add offset: " << -fabs(ball_y) / TABLE_WIDTH * 2.0 * 10 << " mm.\n";
         break;
     }
 }
 
-// 基于目标门的位置和得分，自动选择合适的目标门
+// Automatically choose a target based on the ball position
 Point choice(double ball_x, double ball_y) {
     Point ball{ ball_x, ball_y, 0, 0, 0 };
     int best_goal = -1;
@@ -178,53 +287,53 @@ Point choice(double ball_x, double ball_y) {
     double min_center_dist = 1e9;
     Point target;
 
-    logger(Info, "Start choosing a target.");
+    //logger(Info, "Start choosing a target.");
 
     for (std::map<int, std::tuple<double, double, int>>::const_iterator it = goals.begin(); it != goals.end(); ++it) {
-        // 遍历所有目标
+        // Search through all goals
         int id = it->first;
         double gx = std::get<0>(it->second);
         double gy = std::get<1>(it->second);
         int score = std::get<2>(it->second);
 
-        logger(Info);
-        std::cout << "Considering target (" << gx << ", " << gy << ").\n";
-        
+        //logger(Info);
+        //std::cout << "Considering target (" << gx << ", " << gy << ").\n";
+
         if (!can_pass_goal(ball_x, ball_y, gx, gy)) continue;
 
         bool prefer_direction = (ball_y > 0 && gy < 0) || (ball_y < 0 && gy > 0);
 
         if (prefer_direction) {
-            logger(Info, "Good direction.");
+            //logger(Info, "Good direction.");
             if (score > best_score || (score == best_score && fabs(gy) < min_center_dist)) {
                 best_score = score;
                 min_center_dist = fabs(gy);
                 best_goal = id;
                 target.x = gx;
                 target.y = gy;
-                logger(Info);
-                std::cout << "Target changed. Target ID " << best_goal << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
+                //logger(Info);
+                //std::cout << "Target changed. Target ID " << best_goal << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
             }
             else {
-                logger(Info, "Not a good goal.");
+                //logger(Info, "Not a good goal.");
             }
         }
         else {
-            logger(Info, "Not in good direction. Not a good goal.");
+            //logger(Info, "Not in good direction. Not a good goal.");
         }
     }
 
     if (best_goal == -1) {
-        logger(Info, "No goal fits requirement. Lower the limit.");
+        //logger(Info, "No goal fits requirement. Lower the limit.");
         for (std::map<int, std::tuple<double, double, int>>::const_iterator it = goals.begin(); it != goals.end(); ++it) {/////////////////
-            // 遍历所有目标
+            // Search through all goals
             int id = it->first;
             double gx = std::get<0>(it->second);
             double gy = std::get<1>(it->second);
             int score = std::get<2>(it->second);
 
-            logger(Info);
-            std::cout << "Considering target (" << gx << ", " << gy << ").\n";
+            //logger(Info);
+            //std::cout << "Considering target (" << gx << ", " << gy << ").\n";
 
             if (!can_pass_goal(ball_x, ball_y, gx, gy)) continue;
 
@@ -234,17 +343,17 @@ Point choice(double ball_x, double ball_y) {
                 best_goal = id;
                 target.x = gx;
                 target.y = gy;
-                logger(Info);
-                std::cout << "Target changed. Target ID " << best_goal << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
+                //logger(Info);
+                //std::cout << "Target changed. Target ID " << best_goal << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
             }
             else
             {
-                logger(Info, "Not a good goal.");
+                //logger(Info, "Not a good goal.");
             }
         }
     }
 
-    if (best_goal == -1) {  // 找不到门，默认打5
+    if (best_goal == -1) {  // Default to goal 5 if no goal is found
         logger(Error, "Not valid goal. Default: Goal 5.");
         best_goal = 5;
         target.x = std::get<0>(goals[5]);
@@ -257,72 +366,179 @@ Point choice(double ball_x, double ball_y) {
 }
 
 void record_trajectory() {
-    // 打开CSV文件（每次打开时清空内容，如果文件不存在则会创建）
-    std::ofstream outfile(config.csv_path, std::ios::trunc); // trunc模式会覆盖文件内容
-    logger(Info);
-    std::cout << "CSV path: " << config.csv_path << "\n";
+    // Open the CSV file for writing
+    std::ofstream outfile(config.csv_path, std::ios::trunc);
+    if (config.if_record_trajectory)
+    {
 
-    if (!outfile.is_open()) {
-        logger(Error, "Can't open csv file!");
-        return;
+        logger(Info);
+        std::cout << "CSV path: " << config.csv_path << "\n";
+
+        if (!outfile.is_open()) {
+            logger(Error, "Can't open csv file!");
+            return;
+        }
+
+        // write the header to the CSV file
+        outfile << "time,x,y" << std::endl;
     }
 
-    // 写入表头
-    outfile << "time,x,y" << std::endl;
+    queue<Point> track;  // Vector to store the trajectory points
 
-    // 初始化上一帧的位置
-    Point last_ball_pos = { 0, 0, 0, 0, 0 };  // 假设 (0, 0) 位置为初始值，或上次记录的球的位置
+    Point last_ball_pos = { 0, 0, 0, 0, 0 };
 
-    while (fabs(ballPos.x) < 0.1 && fabs(ballPos.y) < 0.1);
+    while (fabs(ball_position.x) < 0.1 && fabs(ball_position.y) < 0.1);
 
     while (true) {
-        // 读取球的位置时加锁，避免数据竞争
         double ball_x, ball_y, time_stamp;
-        {
-            std::lock_guard<std::mutex> lock(mtx);  // 使用 std::lock_guard 自动管理锁
-            ball_x = ballPos.x;
-            ball_y = ballPos.y;
-            time_stamp = ballPos.t;
+
+        std::lock_guard<std::mutex> lock(mtx);  // 使用 std::lock_guard 自动管理锁
+        ball_x = ball_position.x;
+        ball_y = ball_position.y;
+        time_stamp = ball_position.t;
+
+        // Check if the ball is detected
+        if (balls_n == 0) {
+            Sleep(400);
+
+            if (balls_n == 0)
+            {
+                logger(Info, "No ball detected. Recording stop.");
+                break;  // No ball detected, stop recording
+            }
+            ball_x = ball_position.x;
+            ball_y = ball_position.y;
+            time_stamp = ball_position.t;
         }
 
-        // 检测球坐标是否有效
-        if (fabs(ball_x) < 0.1 || fabs(ball_y) < 0.1) {
-            logger(Error, "No ball detected.");
-            break;  // 如果检测不到球，停止记录
-        }
-
-        // 检查球是否超出球桌范围
+        // Check if the ball is within the table boundaries
         if (fabs(ball_x) > TABLE_LENGTH - 150 || fabs(ball_y) > TABLE_WIDTH - 30) {
             logger(Info, "Recording stop.");
-            break;  // 如果球超出球桌范围，停止记录
+            break;  // Automatically stop recording if the ball is out of bounds
         }
 
-        // 判断当前坐标和上一次坐标的变化，如果变化较小则不记录
+        // Check if the ball position has changed significantly
         if (fabs(ball_x - last_ball_pos.x) < 0.5 && fabs(ball_y - last_ball_pos.y) < 0.5) {
-            continue;  // 跳过本次记录
+            continue;  // Skip writing if the position hasn't changed significantly
         }
 
-        // 将时间戳和坐标写入文件
-        outfile << time_stamp << "," << ball_x << "," << ball_y << std::endl;
+        if (config.if_record_trajectory)
+        {
+            // write the current ball position and timestamp to the CSV file
+            outfile << time_stamp << "," << ball_x << "," << ball_y << std::endl;
+        }
 
-        // 更新上一次坐标
+        track.push({ ball_x, ball_y, time_stamp, 0, 0 }); // Store the point in the track vector
+
+        if (track.size() == 11)
+        {
+            track.pop();
+        }
+
+        // update the last ball position
         last_ball_pos.x = ball_x;
         last_ball_pos.y = ball_y;
         last_ball_pos.t = time_stamp;
     }
 
-    outfile.close();  // 关闭文件
-    logger(Info, "Close file.");
+    LinearPredictor predictor(track); // Create a linear predictor based on the recorded trajectory
+
+    double predicted_y = predictor.predict(TABLE_LENGTH - GOAL_THICKNESS); // Predict the y value for the current x position
+    double offset_y = (predicted_y > 0) ? 725 * TABLE_WIDTH / 2.0 / VISUAL_BOARDER : -725 * TABLE_WIDTH / 2.0 / VISUAL_BOARDER;
+    offset_y -= predicted_y; // Calculate the offset based on the predicted y value
+
+    if (config.if_adjacent_learning) outfile << 0 << "," << TABLE_LENGTH - GOAL_THICKNESS << "," << predicted_y << std::endl;
+
+    learning.add_offset(hitting_position.x, hitting_position.y, offset_y);
+
+    if (config.if_adjacent_learning)
+    {
+        logger(Info);
+        std::cout << "Predicted y value: " << predicted_y << ", Offset y: " << offset_y << ". ";
+        std::cout << "Offset added for adjacent learning.\n";
+    }
+
+    outfile.close();  // close the file
+    if (config.if_record_trajectory) logger(Info, "Close file.");
 }
 
 JAKAZuRobot demo;
 MotorIK mkmotor;
 
+void get_correction_data()
+{
+    ifstream angle_file("C:\\Robot\\2025PingPongCampus\\codes\\special\\GoalAngle_correction.csv");
+
+    string line;
+    getline(angle_file, line); // Skip the header line
+    getline(angle_file, line); // Read the first line
+
+    stringstream ss(line);
+    double angle_left, angle_right;
+    ss >> angle_left;
+    ss.ignore(1, ','); // Ignore the comma
+    ss >> angle_right;
+
+    config.jaka_angle_left = angle_left;
+    config.jaka_angle_right = angle_right;
+
+    logger(Info);
+    std::cout << "Jaka mini paddle angle left: " << config.jaka_angle_left << " degrees, right: " << config.jaka_angle_right << " degrees." << std::endl;
+
+    if (config.if_modify_goal)
+    {
+        double a_x, b_x, c_x, a_y, b_y, c_y;
+
+        ifstream goal_file("C:\\Robot\\2025PingPongCampus\\codes\\special\\GoalModifying_correction.csv");
+
+        string line;
+        getline(goal_file, line); // Skip the header line
+        getline(goal_file, line); // Read the first line
+
+        stringstream ss(line);
+
+        ss >> a_x;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> b_x;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> c_x;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> a_y;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> b_y;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> c_y;
+
+        for (int i = 0; i < 9; i++)
+        {
+            goals[i + 1] = std::make_tuple(
+                std::get<0>(goals[i + 1]) * a_x + std::get<1>(goals[i + 1]) * b_x + c_x,
+                std::get<0>(goals[i + 1]) * a_y + std::get<1>(goals[i + 1]) * b_y + c_y,
+                std::get<2>(goals[i + 1])
+            );
+        }
+    }
+}
+
+void getReferee();
+
 int main()
 {
+    ifstream com_file("C:\\Robot\\2025PingPongCampus\\codes\\special\\com.csv");
+    string line;
+
+    getline(com_file, line); // Skip the header line
+
+    stringstream ss(line);
+    ss >> config.motor_com;
+
     logger(Info, "Main loop started.");
 
-    // 启动一个线程运行 getVision()，用于持续接收球的位置数据
+    std::thread t2(getReferee);
+    t2.detach();
+    logger(Info, "Referee system connected.");
+
+    // Another thread to get vision data
     std::thread t1(getVision);
     t1.detach();
     logger(Info, "Vision system connected.");
@@ -330,14 +546,14 @@ int main()
     demo.login_in(config.jaka_ip);
     logger(Info, "Jaka mini connected.");
 
-    demo.power_on();                // 本体上电
-    demo.enable_robot();            // 电机使能
+    demo.power_on();
+    demo.enable_robot();
     logger(Info, "Jaka mini empowered.");
 
 
-    mkmotor.ID = 1;               // 电机ID 为1
-    mkmotor.reduceRatio = 10;     // 设置减速比
-    mkmotor.setSerial(config.motor_com, 115200); // 设置串口COM号，及波特率
+    mkmotor.ID = 1;
+    mkmotor.reduceRatio = 10;
+    mkmotor.setSerial(config.motor_com, 115200);
     mkmotor.start();
     logger(Info, "Motor connected.");
 
@@ -354,20 +570,19 @@ int main()
     ret = demo.joint_move(&jval, MoveMode::ABS, true, 5);
 
     logger(Move, "Motor initializing.");
-    double ini_dianji_degree = 180;
+    double ini_dianji_degree = 0;
     mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
 
     int hit_round = 1;
 
-    while (1)
+    get_correction_data();
+
+    while (cmd != 'e')
     {
+        if (cmd != 'k') continue;
+
         logger(Info);
         std::cout << "Round " << hit_round << ".\n";
-
-        logger(Hint, "Pre ENTER to hit...");
-
-        char ch = std::cin.get();
-        if (ch != '\n') continue;
 
         logger(Info, "Begin hitting.");
 
@@ -376,8 +591,8 @@ int main()
 
         double ball_x, ball_y;
         mtx.lock();
-        ball_x = ballPos.x;
-        ball_y = ballPos.y;
+        ball_x = ball_position.x;
+        ball_y = ball_position.y;
         mtx.unlock();
 
         if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01)
@@ -385,21 +600,28 @@ int main()
             logger(Error, "No ball detected!");
             continue;
         }
-        
+
+        hitting_position.x = ball_x;
+        hitting_position.y = ball_y;
+
         logger(Info);
         std::cout << "Ball position: (" << ball_x << ", " << ball_y << ").\n";
 
         Point target = choice(ball_x, ball_y);
+        const double y_offset = learning.get_offset(ball_x, ball_y);
         logger(Info);
         std::cout << "Choose target: (" << target.x << ", " << target.y << ").\n";
 
-        goA = goAvalue(ballPos.x, ballPos.y, target.x, target.y);
+        target.y += y_offset; // Adjust target y position based on the offset
         logger(Info);
-        std::cout << "Hit angle: " << goA << ".\n";
+        std::cout << "Target after offset: (" << target.x << ", " << target.y << ").\n";
 
-        pos.tran.x = ball_x + BALL_DELTA_X;
-        pos.tran.y = ball_y + BALL_DELTA_Y;
-        pos.tran.z = ball_y > 0 ? HEIGHT_LEFT : HEIGHT_RIGHT;
+        goA = goAvalue(ball_position.x, ball_position.y, target.x, target.y);
+
+
+        pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(goA) + config.jaka_offset_x;
+        pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(goA) + config.jaka_offset_y;
+        pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
         if (ball_y > 0) {
             pos.rpy.rx = (-90 + goA) * Deg2Rad;
@@ -412,18 +634,18 @@ int main()
             pos.rpy.rz = 0;
         }
 
-        double ini_angle = 90;
+        double ini_angle = -90; // !DIRECTION
 
         try {
             demo.kine_inverse(&jval, &pos, &jvalH);
         }
         catch (std::runtime_error) {
-            std::cout << "inverse error!" << std::endl;
+            logger(Error, "Inverse error!");
             continue;
         }
 
         logger(Move, "Jaka mini and motor preparing.");
-        mkmotor.goToPos2(ini_angle, 1, 200, false);
+        mkmotor.goToPos2(ini_angle, 1, 200, false); // !DIRECTION
         demo.joint_move(&jvalH, MoveMode::ABS, true, 1);
 
         Sleep(200);
@@ -431,13 +653,10 @@ int main()
         logger(Info);
         std::cout << "Motor hitting speed: " << speed << ".\n";
         logger(Move, "Motor hitting.");
-        mkmotor.goToPos2((ball_y > 0) ? (ini_angle - 180) : (ini_angle + 180), 1, speed, false);
+        mkmotor.goToPos2((ball_y > 0) ? (ini_angle - 180) : (ini_angle + 180), 0, speed, false); // !DIRECTION
 
-        if (config.if_record_trajectory) 
-        {
-            std::thread t2(record_trajectory);
-            t2.detach();
-        }
+        std::thread t2(record_trajectory);
+        t2.detach();
 
         Sleep(900);
         logger(Move, "Jaka mini and motor returning.");
@@ -451,46 +670,134 @@ int main()
     return 0;
 }
 
-// 函数：持续接收视觉数据
+// Constantly get vision data in a separate thread
 void getVision()
 {
     RoboCupSSLClient client;
-    client.open(true); // 打开客户端连接
+    client.open(true);
     SSL_WrapperPacket packet;
-    std::vector<Point> ballP; // 存储球的位置历史记录
+    std::vector<Point> ballP;
+
+    double a_x, b_x, c_x, a_y, b_y, c_y;
+
+    if (config.if_vision_correction)
+    {
+        ifstream correction_file("C:\\Robot\\2025PingPongCampus\\codes\\special\\visual_correction.csv");
+        string line;
+        getline(correction_file, line); // Skip the header line
+        getline(correction_file, line); // Read the first line
+
+        stringstream ss(line);
+
+        ss >> a_x;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> b_x;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> c_x;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> a_y;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> b_y;
+        ss.ignore(1, ','); // Ignore the comma
+        ss >> c_y;
+    }
+    else
+    {
+        a_x = 1.0; b_x = 0.0; c_x = 0.0;
+        a_y = 0.0; b_y = 1.0; c_y = 0.0;
+    }
 
     while (true)
     {
         if (client.receive(packet))
         {
             if (packet.has_detection())
-            { // 检查是否有检测到的数据
+            {
+                // Check if the packet contains detection data
                 SSL_DetectionFrame detection = packet.detection();
-                int balls_n = detection.balls_size(); // 获取检测到的球的数量
+                balls_n = detection.balls_size(); // Get the number of detected balls
                 //std::cout << ball.x();
-                // 更新球的位置
+                // Update the ball position
                 for (int i = 0; i < balls_n; i++)
                 {
                     SSL_DetectionBall ball = detection.balls(i);
                     Point pp;
-                    pp.x = ball.x(); // 调整 x 位置，减去 20 个单位
-                    pp.y = ball.y();
-                    // pp.t = (detection.t_capture() / 10 - (int)(detection.t_capture() / 10)); // 计算时间信息
-                    pp.t = detection.t_capture(); // 使用完整的时间戳
-                    mtx.lock();                   // 加锁以确保线程安全
-                    ballPos = pp;                 // 更新全局的球位置
-                    mtx.unlock();                 // 解锁
+                    pp.x = a_x * ball.x() + b_x * ball.y() + c_x; // Apply correction
+                    pp.y = a_y * ball.x() + b_y * ball.y() + c_y; // Apply correction
+                    pp.t = detection.t_capture();
+                    mtx.lock();
+                    ball_position = pp;
+                    mtx.unlock();
 
-                    ballP.push_back(pp); // 将球的位置添加到历史记录中
-                    if (pp.x < 300)      // 如果球的位置接近（x 坐标小于 300），记录数据
-                    {
-                        for (auto ball2 : ballP)
-                        {
-                            // outfile << ball2.x << "," << ball2.y << "," << ball2.t << '\n'; // 将球的位置和时间写入文件
-                        }
-                        // outfile.close(); // 关闭文件
-                    }
+                    ballP.push_back(pp);
                 }
+            }
+        }
+    }
+}
+
+char translateRefMsgs(Referee_Command command)
+{
+
+    switch (command)
+    {
+    case 0:
+        cmd = 'H';
+        break; // Halt
+    case 1:
+        cmd = 'S';
+        break; // Stop
+    case 2:
+        cmd = ' ';
+        break; // Normal start (Ready)
+    case 8:
+        cmd = 'k';
+        break; // Kickoff Yellow
+    case 9:
+        cmd = 'K';
+        break; // Kickoff Blue
+    default:
+        std::cout << "refereebox is fail !!!!! command : " << command << std::endl;
+        cmd = 'H';
+        break;
+    }
+
+    return cmd;
+}
+// 函数：持续接收裁判信息
+void getReferee()
+{
+    int round = 0;
+    RoboCupSSLClient client(10003, "224.5.23.1", "");
+    client.open(true); // 打开客户端连接
+    Referee packet;
+    byte datagram[20000];
+    while (true)
+    {
+        if (client.receive(packet))
+        {
+            if (packet.has_command())
+            { // 检查是否有命令
+                Referee_Command next_command = packet.command();
+                char cmd = translateRefMsgs(next_command); // 将命令转换为控制字符
+                // cout << cmd;
+                if (cmd == 'k' && packet.has_yellow())
+                {
+                    // std::cout << "comand is " << cmd; // 输出命令
+                    Referee_TeamInfo team = packet.yellow();
+                    // std::cout << "current hit num is " << team.timeouts(); //输出当前的击打数
+                    round = team.timeouts();
+                }
+                if (cmd == 'K' && packet.has_blue())
+                {
+                    // std::cout << "comand is " << cmd; // 输出命令
+                    Referee_TeamInfo team = packet.blue();
+                    // std::cout << "current hit num is " << team.timeouts();//输出当前的击打数
+                }
+            }
+            if (packet.has_yellow())
+            {
+                Referee_TeamInfo team = packet.yellow();
             }
         }
     }
