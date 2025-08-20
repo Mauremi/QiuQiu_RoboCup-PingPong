@@ -1,4 +1,5 @@
-﻿#include <stdio.h>
+﻿#pragma comment(lib, "winmm.lib")
+#include <stdio.h>
 #include "net/robocup_ssl_client.h"
 #include "visionProto/messages_robocup_ssl_detection.pb.h"
 #include "visionProto/messages_robocup_ssl_geometry.pb.h"
@@ -10,87 +11,89 @@
 #include "endMotor/MotorIK.h"
 #include <windows.h>
 #include <time.h>
-#pragma comment(lib, "winmm.lib")
-
 #include "SDK2.1.7/Windows/c&c++/inc_of_c++/jkerr.h"
 #include "SDK2.1.7/Windows/c&c++/inc_of_c++/jktypes.h"
 #include "SDK2.1.7/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
 #include <chrono>
+
 #include <thread>
 #include <mutex>
-#define pi222 3.1415926
-#define Deg2Rad (pi222 / 180)
-#define Rad2Deg (180 / pi222)
+#include <mmsystem.h>
 #include <cmath>
-#include <vector>
-#include <fstream>
 #include <complex>
 #include <conio.h> // Windows specific
 #include <list>
-#include <mmsystem.h>
 #include <queue>
+#include <vector>
+#include <fstream>
 
 using namespace std;
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
 
-enum Logger { Info, Error, Move, Hint, Input };
-void logger(Logger l, const char* content = "") {
-    switch (l) {
-    case Info:
-        std::cout << "\t[Info]  " << content; break;
-    case Error:
-        printf("\t\033[0m\033[1;31m[Error] %s\033[0m", content); break;
-    case Move:
-        printf("\t\033[0m\033[1;32m[Move]  %s\033[0m", content); break;
-    case Input:
-        std::cout << "\t[Input] " << content; break;
-    case Hint:
-        printf("\t\033[0m\033[1;36m[Hint]  %s\033[0m", content); break;
-    }
 
-    if (content != "") {
-        std::cout << std::endl;
-    }
-}
-
-template <class T>
-T std_in(T& variable, const char* hint = "") {
-    if (hint != "") {
-        logger(Hint, hint);
-    }
-
-    std::cin >> variable;
-    logger(Input, variable);
-
-    return variable;
-}
+#define pi222 3.1415926
+#define Deg2Rad (pi222 / 180)
+#define Rad2Deg (180 / pi222)
 
 #define TABLE_LENGTH 2740
 #define TABLE_WIDTH 1525
 #define GOAL_WIDTH 80
 #define GOAL_THICKNESS 20
-#define BALL_WIDTH 0 // FIX
-#define VISUAL_BOARDER 762.5  // real boarder of visual system // FIX
 
-std::map<int, std::tuple<double, double, int>> goals = {
-    {1, {TABLE_LENGTH - GOAL_THICKNESS,  725, 6}},
-    {2, {TABLE_LENGTH - GOAL_THICKNESS,  540, 5}},
-    {3, {TABLE_LENGTH - GOAL_THICKNESS,  360, 5}},
-    {4, {TABLE_LENGTH - GOAL_THICKNESS,  180, 4}},
-    {5, {TABLE_LENGTH - GOAL_THICKNESS,    0, 4}},
-    {6, {TABLE_LENGTH - GOAL_THICKNESS, -180, 4}},
-    {7, {TABLE_LENGTH - GOAL_THICKNESS, -360, 5}},
-    {8, {TABLE_LENGTH - GOAL_THICKNESS, -540, 5}},
-    {9, {TABLE_LENGTH - GOAL_THICKNESS, -725, 6}},
+
+enum Logger { Info, Error, Move, Hint, Input };
+
+namespace detail {
+    template <typename... Args>
+    inline void print_all(std::ostream& os, const Args&... args) {
+        int _[] = { 0, ((void)(os << args), 0)... };
+        (void)_;
+    }
+}
+
+template <typename... Args>
+void logger(Logger l, const Args&... args) {
+    switch (l) {
+    case Info:  std::cout << "\t[Info]  "; break;
+    case Error: std::cout << "\t\033[0m\033[1;31m[Error] "; break;
+    case Move:  std::cout << "\t\033[0m\033[1;32m[Move]  "; break;
+    case Input: std::cout << "\t[Input] "; break;
+    case Hint:  std::cout << "\t\033[0m\033[1;36m[Hint]  "; break;
+    }
+
+    detail::print_all(std::cout, args...);
+
+    switch (l) {
+    case Error: case Move: case Hint:
+        std::cout << "\033[0m";
+        break;
+    default:
+        break;
+    }
+    std::cout << '\n';
+}
+
+
+std::map<int, std::pair<double, double>> goals = {
+    {1, {TABLE_LENGTH - GOAL_THICKNESS,  725}},
+    {2, {TABLE_LENGTH - GOAL_THICKNESS,  540}},
+    {3, {TABLE_LENGTH - GOAL_THICKNESS,  360}},
+    {4, {TABLE_LENGTH - GOAL_THICKNESS,  180}},
+    {5, {TABLE_LENGTH - GOAL_THICKNESS,    0}},
+    {6, {TABLE_LENGTH - GOAL_THICKNESS, -180}},
+    {7, {TABLE_LENGTH - GOAL_THICKNESS, -360}},
+    {8, {TABLE_LENGTH - GOAL_THICKNESS, -540}},
+    {9, {TABLE_LENGTH - GOAL_THICKNESS, -725}},
 };
 // No, x, y, score
 
 struct Config {
     // config
-    const char* jaka_ip = "192.168.1.100"; // jaka mini ip
-    int motor_com = 11; // COM port for the motor
-    const char* csv_path = "C:\\Robot\\2025PingPongCampus\\codes\\special\\goal_trajectory.csv";
+    char* jaka_ip; // jaka mini ip
+    int motor_com; // COM port for the motor
+    char* repo_path;
+    bool if_referee;
 
     // motor speed
     const double speed = 740; // Motor hitting speed
@@ -118,6 +121,7 @@ struct Config {
 
 } config;
 
+
 struct Point
 {
     double x;
@@ -127,30 +131,19 @@ struct Point
     double vy;
 };
 
-class AdjacentLearning
-{
-    struct Offset
-    {
-        Point center; // Center of the offset
-        double y_offset;
-    };
-    list<Offset> offsets_; // List of offsets for adjacent learning
-public:
-    AdjacentLearning() = default;
-    ~AdjacentLearning() = default;
+Point ball_position;         // location of the ball
+int balls_n;
+Point hitting_position;
+double hitting_angle;
+char cmd = 'H'; // Command for the robot
+std::mutex mtx;        // mutex for protecting shared resources
 
-    // Add an offset for adjacent learning
-    void add_offset(const double x, const double y, const double y_offset) {
-        const Offset offset{ {x, y, 0, 0, 0}, y_offset };
-        offsets_.push_back(offset);
-    }
+JAKAZuRobot demo;
+MotorIK mkmotor;
 
-    // Get the offset for a specific position
-    double get_offset(const double x, const double y) const {
+void get_vision();      // Function to get vision data
+void get_referee();
 
-        return 0;
-    }
-} learning;
 
 class LinearPredictor
 {
@@ -205,19 +198,8 @@ public:
     }
 };
 
-Point ball_position;         // location of the ball
-int balls_n;
-Point hitting_position;
-double goA;
-char cmd = 'H'; // Command for the robot
-
-std::mutex mtx;        // mutex for protecting shared resources
-
-void getVision();      // Function to get vision data
-void getReferee();
-
 // calculate the angle to hit the ball
-double goAvalue(double ball_x, double ball_y, double posi_x, double posi_y)
+double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, double posi_y)
 {
     double run_x = posi_x - ball_x;
     double run_y = posi_y - ball_y;
@@ -225,144 +207,20 @@ double goAvalue(double ball_x, double ball_y, double posi_x, double posi_y)
     double angle_rad = atan2(run_y, run_x);
     double angle_deg = angle_rad * Rad2Deg;
 
-    logger(Info);
-    std::cout << "Calculated angle: " << angle_deg << " degrees." << std::endl;
+    logger(Info, "Calculated angle: ", angle_deg, " degrees.");
 
     return angle_deg;
-}
-
-// check if the ball can pass through the goal
-bool can_pass_goal(double ball_x, double ball_y, double goal_x, double goal_y) {
-    double dx = goal_x - ball_x;
-    if (fabs(dx) < 1e-5)
-    {
-        logger(Error, "Ball_x == goal_x.");
-        return false;  // avoid division by zero
-    }
-    double dy = goal_y - ball_y;
-    double slope = dy / dx;
-    double y_at_goal = ball_y + slope * (dx - GOAL_THICKNESS);
-    bool can = fabs(y_at_goal - goal_y) <= GOAL_WIDTH / 2;
-    if (can) {
-        return true;
-    }
-    else {
-        return false;
-    }
-}
-
-// If the goal is on the sides, add an offset based on the y coordinate
-void add_delta(int id, double ball_y, Point& target) {
-    switch (id) {
-    case 1:
-        target.y += fabs(ball_y) / TABLE_WIDTH * 2.0 * 10;
-        logger(Info);
-        std::cout << "Add offset: " << fabs(ball_y) / TABLE_WIDTH * 2.0 * 10 << " mm.\n";
-        break;
-    case 9:
-        target.y -= fabs(ball_y) / TABLE_WIDTH * 2.0 * 10;
-        logger(Info);
-        std::cout << "Add offset: " << -fabs(ball_y) / TABLE_WIDTH * 2.0 * 10 << " mm.\n";
-        break;
-    }
-}
-
-// Automatically choose a target based on the ball position
-Point choice(double ball_x, double ball_y) {
-    Point ball{ ball_x, ball_y, 0, 0, 0 };
-    int best_goal = -1;
-    int best_score = -1;
-    double min_center_dist = 1e9;
-    Point target;
-
-    //logger(Info, "Start choosing a target.");
-
-    for (std::map<int, std::tuple<double, double, int>>::const_iterator it = goals.begin(); it != goals.end(); ++it) {
-        // Search through all goals
-        int id = it->first;
-        double gx = std::get<0>(it->second);
-        double gy = std::get<1>(it->second);
-        int score = std::get<2>(it->second);
-
-        //logger(Info);
-        //std::cout << "Considering target (" << gx << ", " << gy << ").\n";
-
-        if (!can_pass_goal(ball_x, ball_y, gx, gy)) continue;
-
-        bool prefer_direction = (ball_y > 0 && gy < 0) || (ball_y < 0 && gy > 0);
-
-        if (prefer_direction) {
-            //logger(Info, "Good direction.");
-            if (score > best_score || (score == best_score && fabs(gy) < min_center_dist)) {
-                best_score = score;
-                min_center_dist = fabs(gy);
-                best_goal = id;
-                target.x = gx;
-                target.y = gy;
-                //logger(Info);
-                //std::cout << "Target changed. Target ID " << best_goal << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
-            }
-            else {
-                //logger(Info, "Not a good goal.");
-            }
-        }
-        else {
-            //logger(Info, "Not in good direction. Not a good goal.");
-        }
-    }
-
-    if (best_goal == -1) {
-        //logger(Info, "No goal fits requirement. Lower the limit.");
-        for (std::map<int, std::tuple<double, double, int>>::const_iterator it = goals.begin(); it != goals.end(); ++it) {/////////////////
-            // Search through all goals
-            int id = it->first;
-            double gx = std::get<0>(it->second);
-            double gy = std::get<1>(it->second);
-            int score = std::get<2>(it->second);
-
-            //logger(Info);
-            //std::cout << "Considering target (" << gx << ", " << gy << ").\n";
-
-            if (!can_pass_goal(ball_x, ball_y, gx, gy)) continue;
-
-            if (score > best_score || (score == best_score && fabs(gy) < min_center_dist)) {
-                best_score = score;
-                min_center_dist = fabs(gy);
-                best_goal = id;
-                target.x = gx;
-                target.y = gy;
-                //logger(Info);
-                //std::cout << "Target changed. Target ID " << best_goal << ", Position(" << target.x << ", " << target.y << "), Centre distance minimum " << min_center_dist << " mm.\n";
-            }
-            else
-            {
-                //logger(Info, "Not a good goal.");
-            }
-        }
-    }
-
-    if (best_goal == -1) {  // Default to goal 5 if no goal is found
-        logger(Error, "Not valid goal. Default: Goal 5.");
-        best_goal = 5;
-        target.x = std::get<0>(goals[5]);
-        target.y = std::get<1>(goals[5]);
-    }
-
-    if (config.if_add_delta) add_delta(best_goal, ball_y, target);
-
-    return target;
 }
 
 std::ofstream csvfile;
 
 void record_trajectory() {
     // Open the CSV file for writing
-    std::ofstream outfile(config.csv_path, std::ios::trunc);
+    std::ofstream outfile(string(config.repo_path) + "\\special\\goal\\data_trajectory.csv", std::ios::trunc);
     if (config.if_record_trajectory)
     {
 
-        logger(Info);
-        std::cout << "CSV path: " << config.csv_path << "\n";
+        logger(Info, "CSV path: ", config.repo_path, "\\special\\goal\\data_trajectory.csv");
 
         if (!outfile.is_open()) {
             logger(Error, "Can't open csv file!");
@@ -439,106 +297,83 @@ void record_trajectory() {
         last_ball_pos.t = time_stamp;
     }
     Point last_point = last_ball_pos;
-    logger(Info);
-    std::cout << "last point (" << last_point.x << "," << last_point.y << ")" << std::endl;
+    logger(Info, "last point (", last_point.x, ",", last_point.y, ")");
 
-    double real_angle = goAvalue(first_point.x, first_point.y, last_point.x, last_point.y);
-    double delta = real_angle - goA;
+    double real_angle = calculate_hitting_angle(first_point.x, first_point.y, last_point.x, last_point.y);
+    double delta = real_angle - hitting_angle;
 
     csvfile << delta;
 
-    if (goA < 0) csvfile << ",";
+    if (hitting_angle < 0) csvfile << ",";
     else
     {
         csvfile << "\n";
         csvfile.close();
     }
 
-    logger(Info);
-    std::cout << "Delta: " << delta << " degrees.\n";
+    logger(Info, "Delta: ", delta, " degrees.");
     LinearPredictor predictor(track); // Create a linear predictor based on the recorded trajectory
 
     double predicted_y = predictor.predict(TABLE_LENGTH - GOAL_THICKNESS); // Predict the y value for the current x position
-    double offset_y = (predicted_y > 0) ? 725 * TABLE_WIDTH / 2.0 / VISUAL_BOARDER : -725 * TABLE_WIDTH / 2.0 / VISUAL_BOARDER;
+    double offset_y = (predicted_y > 0) ? 725 : -725;
     offset_y -= predicted_y; // Calculate the offset based on the predicted y value
 
     if (config.if_adjacent_learning) outfile << 0 << "," << TABLE_LENGTH - GOAL_THICKNESS << "," << predicted_y << std::endl;
 
-    learning.add_offset(hitting_position.x, hitting_position.y, offset_y);
-
     if (config.if_adjacent_learning)
     {
-        logger(Info);
-        std::cout << "Predicted y value: " << predicted_y << ", Offset y: " << offset_y << ". ";
-        std::cout << "Offset added for adjacent learning.\n";
+        logger(Info, "Predicted y value: ", predicted_y, ". ");
     }
 
     outfile.close();  // close the file
     if (config.if_record_trajectory) logger(Info, "Close file.");
 }
 
-JAKAZuRobot demo;
-MotorIK mkmotor;
 
-void get_correction_data()
+void read_config()
 {
-    if (config.if_modify_goal)
-    {
-        double a_x, b_x, c_x, a_y, b_y, c_y;
+    ifstream config_file("config.csv");
+    string line;
 
-        ifstream goal_file("C:\\Robot\\2025PingPongCampus\\codes\\special\\GoalModifying_correction.csv");
+    getline(config_file, line); // Skip the header line
+    getline(config_file, line); // Skip the header line
 
-        string line;
-        getline(goal_file, line); // Skip the header line
-        getline(goal_file, line); // Read the first line
+    stringstream ss(line);
+    config.motor_com = 0;
+    config.jaka_ip = new char[16];
+    config.repo_path = new char[256];
+    config.if_referee = false;
+    ss >> config.motor_com;
+    ss.ignore(1, ','); // Ignore the comma
+    ss.getline(config.jaka_ip, 16, ',');
+    ss.getline(config.repo_path, 256, ',');
+    ss >> config.if_referee;
+    // Log the configuration
 
-        stringstream ss(line);
-
-        ss >> a_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> b_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> c_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> a_y;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> b_y;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> c_y;
-
-        for (int i = 0; i < 9; i++)
-        {
-            goals[i + 1] = std::make_tuple(
-                std::get<0>(goals[i + 1]) * a_x + std::get<1>(goals[i + 1]) * b_x + c_x,
-                std::get<0>(goals[i + 1]) * a_y + std::get<1>(goals[i + 1]) * b_y + c_y,
-                std::get<2>(goals[i + 1])
-            );
-        }
-    }
+    logger(Info, "Configuration loaded:",
+        "Motor COM:", config.motor_com,
+        "; Jaka IP:", config.jaka_ip,
+        "; Repo Path:", config.repo_path,
+        "; If Referee:", config.if_referee);
 }
 
 int main()
 {
-    ifstream com_file("C:\\Robot\\2025PingPongCampus\\codes\\special\\com.csv");
-    string line;
+    read_config();
 
-    getline(com_file, line); // Skip the header line
-
-    stringstream ss(line);
-    ss >> config.motor_com;
-
-    csvfile.open("C:\\Robot\\2025PingPongCampus\\codes\\special\\GoalAngle_correction.csv", std::ios::trunc);
+    csvfile.open(string(config.repo_path) + "\\special\\goal\\data_GoalAngle.csv", std::ios::trunc);
     csvfile << "left, right\n";
+
     logger(Info, "Main loop started.");
 
     // Another thread to get vision data
-    std::thread t1(getVision);
+    std::thread t1(get_vision);
     t1.detach();
     logger(Info, "Vision system connected.");
 
-    std::thread t2(getReferee);
+    std::thread t2(get_referee);
     t2.detach();
-    logger(Info, "Referee system connected.")
+    logger(Info, "Referee system connected.");
 
     demo.login_in(config.jaka_ip);
     logger(Info, "Jaka mini connected.");
@@ -572,14 +407,11 @@ int main()
 
     int hit_round = 1;
 
-    get_correction_data();
-
     while (cmd != 'e')
     {
         if (cmd != 'k') continue;
 
-        logger(Info);
-        std::cout << "Round " << hit_round << ".\n";
+        logger(Info, "Round ", hit_round, ".");
 
         logger(Info, "Begin hitting.");
 
@@ -600,32 +432,25 @@ int main()
         hitting_position.x = ball_x;
         hitting_position.y = ball_y;
 
-        logger(Info);
-        std::cout << "Ball position: (" << ball_x << ", " << ball_y << ").\n";
+        logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
-        Point target = choice(ball_x, ball_y);
-        const double y_offset = learning.get_offset(ball_x, ball_y);
-        logger(Info);
-        std::cout << "Choose target: (" << target.x << ", " << target.y << ").\n";
+        Point target = ball_y > 0 ? Point{ TABLE_LENGTH - GOAL_THICKNESS, goals[9].second, 0 } : Point{ TABLE_LENGTH - GOAL_THICKNESS, goals[1].second, 0 };
+        logger(Info, "Choose target: (", target.x, ", ", target.y, ").");
 
-        target.y += y_offset; // Adjust target y position based on the offset
-        logger(Info);
-        std::cout << "Target after offset: (" << target.x << ", " << target.y << ").\n";
-
-        goA = goAvalue(ball_position.x, ball_position.y, target.x, target.y);
+        hitting_angle = calculate_hitting_angle(ball_position.x, ball_position.y, target.x, target.y);
 
 
-        pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(goA) + config.jaka_offset_x;
-        pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(goA) + config.jaka_offset_y;
+        pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(hitting_angle) + config.jaka_offset_x;
+        pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(hitting_angle) + config.jaka_offset_y;
         pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
         if (ball_y > 0) {
-            pos.rpy.rx = (-90 + goA) * Deg2Rad;
+            pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
             pos.rpy.ry = -90 * Deg2Rad;
             pos.rpy.rz = 0;
         }
         else {
-            pos.rpy.rx = (90 - goA) * Deg2Rad;
+            pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
             pos.rpy.ry = 90 * Deg2Rad;
             pos.rpy.rz = 0;
         }
@@ -646,8 +471,7 @@ int main()
 
         Sleep(200);
         double speed = config.speed;
-        logger(Info);
-        std::cout << "Motor hitting speed: " << speed << ".\n";
+        logger(Info, "Motor hitting speed: ", speed, ".");
         logger(Move, "Motor hitting.");
         mkmotor.goToPos2((ball_y > 0) ? (ini_angle - 180) : (ini_angle + 180), 0, speed, false); // !DIRECTION
 
@@ -659,15 +483,14 @@ int main()
         mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
         demo.joint_move(&jval, MoveMode::ABS, true, 7);
 
-        logger(Info);
-        std::cout << "Round " << hit_round << " completed.\n";
         hit_round++;
     }
     return 0;
 }
 
+
 // Constantly get vision data in a separate thread
-void getVision()
+void get_vision()
 {
     RoboCupSSLClient client;
     client.open(true);
@@ -678,7 +501,7 @@ void getVision()
 
     if (config.if_vision_correction)
     {
-        ifstream correction_file("C:\\Robot\\2025PingPongCampus\\codes\\special\\visual_correction.csv");
+        ifstream correction_file(string(config.repo_path) + "\\special\\public\\visual_correction.csv");
         string line;
         getline(correction_file, line); // Skip the header line
         getline(correction_file, line); // Read the first line
@@ -732,7 +555,7 @@ void getVision()
     }
 }
 
-char translateRefMsgs(Referee_Command command)
+char translate_referee(Referee_Command command)
 {
 
     switch (command)
@@ -761,7 +584,8 @@ char translateRefMsgs(Referee_Command command)
     return cmd;
 }
 // 函数：持续接收裁判信息
-void getReferee()
+
+void get_referee()
 {
     int round = 0;
     RoboCupSSLClient client(10003, "224.5.23.1", "");
@@ -775,7 +599,7 @@ void getReferee()
             if (packet.has_command())
             { // 检查是否有命令
                 Referee_Command next_command = packet.command();
-                char cmd = translateRefMsgs(next_command); // 将命令转换为控制字符
+                char cmd = translate_referee(next_command); // 将命令转换为控制字符
                 // cout << cmd;
                 if (cmd == 'k' && packet.has_yellow())
                 {
