@@ -249,23 +249,23 @@ int main()
 
         // 5个固定角度测试
         const std::vector<double> test_angles = { -50, -30, -10, 0, 10, 30, 50 };
-        for (double goA : test_angles) {
-            logger(Info, "Testing angle: ", goA, " degrees.");
+        for (double hitting_angle : test_angles) {
+            logger(Info, "Testing angle: ", hitting_angle, " degrees.");
 
             CartesianPose pos;
 
             // 基于锁定位置计算（不再需要target）
-            pos.tran.x = recorded_ball_pos.x - config.paddle_ball_center_distance * cos(goA * Deg2Rad);
-            pos.tran.y = recorded_ball_pos.y - config.paddle_ball_center_distance * sin(goA * Deg2Rad) + config.jaka_offset_y;
+            pos.tran.x = recorded_ball_pos.x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad);
+            pos.tran.y = recorded_ball_pos.y - config.paddle_ball_center_distance * sin(hitting_angle * Deg2Rad) + config.jaka_offset_y;
             pos.tran.z = recorded_ball_pos.y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
             // 固定角度击打逻辑
             if (recorded_ball_pos.y > 0) {
-                pos.rpy.rx = (-90 + goA) * Deg2Rad;  // 右侧击球角度
+                pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;  // 右侧击球角度
                 pos.rpy.ry = -90 * Deg2Rad;
             }
             else {
-                pos.rpy.rx = (90 - goA) * Deg2Rad;   // 左侧击球角度 
+                pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;   // 左侧击球角度 
                 pos.rpy.ry = 90 * Deg2Rad;
             }
             pos.rpy.rz = 0;

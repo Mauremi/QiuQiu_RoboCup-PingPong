@@ -68,7 +68,7 @@ ax.set_yticks([])  # 关闭 y 轴
 ax.set_aspect('equal', adjustable='box')
 
 # 文件路径
-file_path = 'bucket_trajectory.csv'  # 修改为你的文件路径
+file_path = 'data_trajectory.csv'  # 修改为你的文件路径
 last_mod_time = 0
 
 

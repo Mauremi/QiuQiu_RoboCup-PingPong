@@ -371,9 +371,12 @@ int main()
     t1.detach();
     logger(Info, "Vision system connected.");
 
-    std::thread t2(get_referee);
-    t2.detach();
-    logger(Info, "Referee system connected.");
+    if(config.if_referee)
+    {
+        std::thread t2(get_referee);
+        t2.detach();
+        logger(Info, "Referee system connected.");
+    }
 
     demo.login_in(config.jaka_ip);
     logger(Info, "Jaka mini connected.");
@@ -409,6 +412,11 @@ int main()
 
     while (cmd != 'e')
     {
+        if (!config.if_referee) {
+            logger(Hint, "Enter 'k' to begin hitting!");
+            cin >> cmd;
+        }
+
         if (cmd != 'k') continue;
 
         logger(Info, "Round ", hit_round, ".");
@@ -583,7 +591,6 @@ char translate_referee(Referee_Command command)
 
     return cmd;
 }
-// 函数：持续接收裁判信息
 
 void get_referee()
 {

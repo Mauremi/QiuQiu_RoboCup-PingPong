@@ -44,7 +44,7 @@ line, = ax.plot([], [], color='orange', linewidth=0.5, label='轨迹', zorder=3)
 scatter = ax.scatter([], [], color='#FF851A', s=40, zorder=4)  # 散点图层略高于轨迹线
 
 # 文件路径
-file_path = 'dynamic_trajectory.csv'  # 修改为你的文件路径
+file_path = 'data_trajectory.csv'  # 修改为你的文件路径
 last_mod_time = 0
 
 
