@@ -38,7 +38,7 @@ using std::chrono::milliseconds;
 
 #define TABLE_LENGTH 2740
 #define TABLE_WIDTH 1525
-#define BUCKET_HEIGHT 100
+#define SANDBOX_HEIGHT 40
 #define GRAVITY 9796.7 // Gravity constant in mm/s^2
 
 enum Logger { Info, Error, Move, Hint, Input };
@@ -74,7 +74,7 @@ void logger(Logger l, const Args&... args) {
 }
 
 
-std::map<int, std::pair<double, double>> buckets = {
+std::map<int, std::pair<double, double>> targets = {
     {1, {TABLE_LENGTH + 280,  560}},
     {2, {TABLE_LENGTH + 280,  0}},
     {3, {TABLE_LENGTH + 280, -560}},
@@ -261,10 +261,10 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
 
 void record_trajectory() {
     // Open the CSV file for writing
-    std::ofstream outfile(string(config.repo_path) + "\\special\\bucket\\data_trajectory.csv", std::ios::trunc);
+    std::ofstream outfile(string(config.repo_path) + "\\national\\static\\data_trajectory.csv", std::ios::trunc);
     if (config.if_record_trajectory)
     {
-        logger(Info, "CSV path: ", config.repo_path, "\\special\\bucket\\data_trajectory.csv");
+        logger(Info, "CSV path: ", config.repo_path, "\\national\\static\\data_trajectory.csv");
 
         if (!outfile.is_open()) {
             logger(Error, "Can't open csv file!");
@@ -338,7 +338,7 @@ void record_trajectory() {
 
     // predict the landing position
     double velocity_x = config.fiction_factor * (track.back().x - track.front().x) / (track.back().t - track.front().t);
-    double height = (TABLE_WIDTH / 2 + predicted_edge_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
+    double height = (TABLE_WIDTH / 2 + predicted_edge_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - SANDBOX_HEIGHT;
     double flight_time = sqrt(2.0 * height / GRAVITY);
     double predicted_x = TABLE_LENGTH + velocity_x * flight_time; // Predict the x value based on the velocity and flight time
     double predicted_y = predictor.predict(predicted_x);
@@ -381,7 +381,7 @@ double define_motor_speed(double ball_x, double ball_y, double target_x, double 
     double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
 
     double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
-    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
+    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - SANDBOX_HEIGHT;
     double flight_time = sqrt(off_table_height);
 
     double speed = flight_distance / flight_time;
@@ -395,7 +395,7 @@ double define_motor_speed(double ball_x, double ball_y, double target_x, double 
 
 void get_correction_data()
 {
-    ifstream angle_file(string(config.repo_path) + "\\special\\bucket\\data_BucketAngle.csv");
+    ifstream angle_file(string(config.repo_path) + "\\national\\static\\data_StaticAngle.csv");
 
     string line;
     getline(angle_file, line); // Skip the header line
@@ -417,7 +417,7 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
 {
     for (int i = 5; i > 0; i--)
     {
-        target = { std::get<0>(buckets[i]), std::get<1>(buckets[i]), 0, 0, 0 };
+        target = { std::get<0>(targets[i]), std::get<1>(targets[i]), 0, 0, 0 };
 
         logger(Info, "Trying target (", target.x, ", ", target.y, ").");
 
@@ -568,7 +568,7 @@ int main()
 
         logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
-        target = ball_y > 0 ? Point{ buckets[5].first, buckets[5].second, 0, 0, 0 } : Point{ buckets[4].first, buckets[4].second, 0, 0, 0 };
+        target = ball_y > 0 ? Point{ targets[5].first, targets[5].second, 0, 0, 0 } : Point{ targets[4].first, targets[4].second, 0, 0, 0 };
         double y_offset = learning.get_offset_y(ball_x, ball_y);
         double x_offset = learning.get_offset_x(ball_x, ball_y);
         logger(Info, "Choose target: (", target.x, ", ", target.y, ").");
@@ -650,7 +650,7 @@ void get_vision()
 
     if (config.if_vision_correction)
     {
-        ifstream correction_file(string(config.repo_path) + "\\special\\public\\visual_correction.csv");
+        ifstream correction_file(string(config.repo_path) + "\\national\\public\data_VisionCorrection.csv");
         string line;
         getline(correction_file, line); // Skip the header line
         getline(correction_file, line); // Read the first line
