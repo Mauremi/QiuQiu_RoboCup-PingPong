@@ -137,39 +137,6 @@ void get_vision();      // vision thread function
 void get_referee();
 
 
-class AdjacentLearning
-{
-    struct Offset
-    {
-        Point center; // Center of the offset
-        double y_offset;
-        double x_offset;
-    };
-    list<Offset> offsets_; // List of offsets for adjacent learning
-public:
-    AdjacentLearning() = default;
-    ~AdjacentLearning() = default;
-
-    // Add an offset for adjacent learning
-    void add_offset(const double x, const double y, const double y_offset, const double x_offset) {
-        const Offset offset{ {x, y, 0, 0, 0}, y_offset, x_offset };
-        offsets_.push_back(offset);
-    }
-
-    // Get the offset for a specific position
-    double get_offset_y(const double x, const double y) const {
-
-        return 0;
-    }
-
-    //!!! to be implemented
-    double get_offset_x(const double x, const double y) const
-    {
-
-        return 0;
-    }
-} learning;
-
 class LinearPredictor
 {
     double slope;     // Slope of the line
@@ -339,8 +306,6 @@ void record_trajectory() {
     double offset_y = target.y - predicted_y;
     double offset_x = target.x - predicted_x;
 
-    learning.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
-
     double offset_angle = calculate_hitting_angle(ball_position.x, ball_position.y, predicted_x, predicted_y) - hitting_angle;
     std::cout << "Offset angle:" << offset_angle << std::endl;
 
@@ -496,15 +461,10 @@ int main()
         logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
         target = ball_y > 0 ? Point{ buckets[5].first, buckets[5].second, 0, 0, 0 } : Point{ buckets[4].first, buckets[4].second, 0, 0, 0 };
-        double y_offset = learning.get_offset_y(ball_x, ball_y);
-        double x_offset = learning.get_offset_x(ball_x, ball_y);
         logger(Info, "Choose target: (", target.x, ", ", target.y, ").");
 
-        Point modified_target = { target.x + x_offset, target.y + y_offset, 0, 0, 0 }; // Apply the offset to the target
-        logger(Info, "Target after offset: (", modified_target.x, ", ", modified_target.y, ").");
-
         // calculate the angle to hit the ball
-        hitting_angle = calculate_hitting_angle(ball_position.x, ball_position.y, modified_target.x, modified_target.y);
+        hitting_angle = calculate_hitting_angle(ball_position.x, ball_position.y, target.x, target.y);
         double hitting_angle_rad = hitting_angle * Deg2Rad;
 
         pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(hitting_angle_rad) + config.jaka_offset_x;
@@ -539,7 +499,7 @@ int main()
         Sleep(200);
 
         // Decide the speed based on the ball position
-        double speed = define_motor_speed(ball_position.x, ball_position.y, modified_target.x, modified_target.y);
+        double speed = define_motor_speed(ball_position.x, ball_position.y, target.x, target.y);
 
         logger(Info, "Motor hitting speed: ", speed, ".");
 

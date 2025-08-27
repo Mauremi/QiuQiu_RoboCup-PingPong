@@ -560,6 +560,8 @@ int main()
         ball_y = ball_position.y;
         mtx.unlock();
 
+		hitting_position = { ball_x, ball_y, 0, 0, 0 };
+
         if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01)
         {
             logger(Error, "No ball detected!");
