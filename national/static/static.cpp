@@ -128,6 +128,7 @@ Point hitting_position;
 Point target;
 char cmd = 'H'; // Command for the robot
 std::mutex mtx;        // mutex for protecting shared resources
+std::ofstream offset_file(string(config.repo_path) + "\\national\\static\\data_offsets.csv", std::ios::trunc);  // 覆盖
 
 JAKAZuRobot demo;
 MotorIK mkmotor;
@@ -154,14 +155,12 @@ public:
         const Offset offset{ {x, y, 0, 0, 0}, y_offset, x_offset };
         offsets_.push_back(offset);
         // write csv
-        std::ofstream file("data_offsets.csv", std::ios::app);  // 追加模式
-        if (file.is_open()) {
-            file << y<< "," 
-                << x << "," 
-                << offset_y << "," 
-                << offset_x << "," 
+        if (offset_file.is_open()) {
+            offset_file << y << ","
+                << x << ","
+                << y_offset << ","
+                << x_offset << ","
                 << "normal" << std::endl;
-            file.close();
         }
     }
 
@@ -368,9 +367,10 @@ void record_trajectory() {
     double offset_y = target.y - predicted_y;
     double offset_x = target.x - predicted_x;
 
-    if (hitting_position.y > 0){
+    if (hitting_position.y > 0) {
         learning_left.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
-    }else{
+    }
+    else {
         learning_right.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
     }
 
@@ -434,7 +434,7 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
         target = { std::get<0>(targets[i]), std::get<1>(targets[i]), 0, 0, 0 };
 
         logger(Info, "Trying target (", target.x, ", ", target.y, ").");
-        
+
         double y_offset = (ball_y > 0) ? learning_left.get_offset_y(ball_x, ball_y) : learning_right.get_offset_y(ball_x, ball_y);
         double x_offset = (ball_y > 0) ? learning_left.get_offset_x(ball_x, ball_y) : learning_right.get_offset_x(ball_x, ball_y);
 
@@ -574,7 +574,7 @@ int main()
         ball_y = ball_position.y;
         mtx.unlock();
 
-		hitting_position = { ball_x, ball_y, 0, 0, 0 };
+        hitting_position = { ball_x, ball_y, 0, 0, 0 };
 
         if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01)
         {
