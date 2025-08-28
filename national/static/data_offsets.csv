@@ -1,6 +1,6 @@
 x,y,x_offset,y_offset,point_type
 -461,136.5,-40.54,-14.11,normal
--216,140,-27,20.8,normal
-300,74,13.5,27,normal
+-216,140,27,20.8,normal
+300,74,-13.5,27,normal
 345,140,39.3,-12.8,normal
-70,90,29.7,-36,normal
+70,90,-29.7,-36,normal
