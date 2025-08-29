@@ -104,8 +104,8 @@ def update_plot(frame):
 
                 # 遍历所有数据点，累积贡献（注意：保持左右隔离）
                 for _, row in df.iterrows():
-                    px = row['x']        # 原始点的水平坐标（-500..500）
-                    py = row['y']        # 原始点的垂直坐标（0..250）
+                    px = row['y']        # 原始点的水平坐标（-500..500）
+                    py = row['x']        # 原始点的垂直坐标（0..250）
                     x_off = row['x_offset']
                     y_off = row['y_offset']
 
@@ -139,9 +139,9 @@ def update_plot(frame):
 
         # 散点保持展示所有原始点（不作左右隔离）
         if len(df) > 0:
-            scatter1.set_offsets(np.column_stack([df['x'], df['y']]))
+            scatter1.set_offsets(np.column_stack([df['y'], df['x']]))
             scatter1.set_array(df['x_offset'])
-            scatter2.set_offsets(np.column_stack([df['x'], df['y']]))
+            scatter2.set_offsets(np.column_stack([df['y'], df['x']]))
             scatter2.set_array(df['y_offset'])
         else:
             scatter1.set_offsets([])
