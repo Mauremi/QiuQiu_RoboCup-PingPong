@@ -196,7 +196,7 @@ public:
         }
         return offset_sum;
     }
-} learning;
+} learning_left, learning_right;
 
 class LinearPredictor
 {
@@ -364,7 +364,12 @@ void record_trajectory() {
     double offset_y = target.y - predicted_y;
     double offset_x = target.x - predicted_x;
 
-    learning.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
+    if (hitting_position.y > 0) {
+        learning_left.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
+    }
+    else {
+        learning_right.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
+    }
 
     if (config.if_adjacent_learning)
     {
@@ -612,8 +617,8 @@ int main()
         logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
         target = ball_y > 0 ? Point{ targets[5].first, targets[5].second, 0, 0, 0 } : Point{ targets[4].first, targets[4].second, 0, 0, 0 };
-        double y_offset = learning.get_offset_y(ball_x, ball_y);
-        double x_offset = learning.get_offset_x(ball_x, ball_y);
+        double y_offset = ball_y > 0 ? learning_left.get_offset_y(ball_x, ball_y) : learning_right.get_offset_y(balll_x, ball_y);
+        double x_offset = ball_y > 0 ? learning_left.get_offset_x(ball_x, ball_y) : learning_right.get_offset_x(balll_x, ball_y);
         logger(Info, "Choose target: (", target.x, ", ", target.y, ").");
 
         Point modified_target = { target.x + x_offset, target.y + y_offset, 0, 0, 0 }; // Apply the offset to the target
