@@ -101,9 +101,6 @@ struct Config {
 
     // motor speed
     const int speed = 740; // Maximum speed for the motor
-    const int first_threshold = 1300;
-    const int second_threshold = 700;
-    const int third_threshold = 400;
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
 
@@ -116,9 +113,9 @@ struct Config {
     // trajectory prediction
     const double linear_weight_quadratic = 0.9; // Weight for linear prediction in trajectory prediction
     const int quadratic_prediction_mode = 0; // Choose among 0(batch), 1(whole), 2(half)
-    
+
     // IFs
-    const bool if_record_trajectory = true; 
+    const bool if_record_trajectory = true;
     const bool if_record_prediction = true;
     const bool if_vision_correction = false;
 
@@ -144,8 +141,6 @@ int hitting_round = 1;
 char cmd = 'H';
 double hitting_angle = -10;
 JointValue jval, jvalH, inijval;
-int test_round = 0; // 测试轮次计数器
-
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
 bool is_hitting = false;
@@ -579,40 +574,37 @@ void trajectory_prediction()
 {
     errno_t ret;
     uint64_t time_start, time_end;
-    static std::vector<Point> second_half_points;
-    static std::vector<Point> full_table_points;
+    std::vector<Point> second_half_points;
+    std::vector<Point> full_table_points;
 
-    // 打开预测结果记录文件
     if (config.if_record_trajectory) {
         // 打开记录轨迹文件
-        trajectory_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_trajectory", std::ios::trunc);
+        trajectory_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_trajectory.csv", std::ios::trunc);
         if (!trajectory_outfile.is_open()) {
             logger(Error, "Failed to open trajectory CSV file.");
         }
-        trajectory_outfile << "t,x,y\n"; // Write header
+        trajectory_outfile << "t,x,y" << std::endl; // Write header
     }
 
-    // 打开预测结果记录文件
     if (config.if_record_prediction) {
         prediction_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_prediction.csv", std::ios::app);
         if (!prediction_outfile.is_open()) {
             logger(Error, "Failed to open prediction comparison CSV file.");
         }
         else {
-            // 如果是第一次运行，写入表头
-            if (test_round == 0) {
-                prediction_outfile << "test_round,batch_prediction,full_table_prediction,half_table_prediction\n";
-            }
+            prediction_outfile << "stage,linear,batch_quadratic,full_table_quadratic,half_table_quadratic" << std::endl;
         }
     }
-    
+
 
     double x = 200;
+    int stage = 0;
     while (!is_hitting)
     {
+        stage++;
         std::vector<Point> track = record_trajectory_before(10, time_start, time_end, config.hitting_threshold, 2740);
 
-        // 收集数据点
+
         for (const auto& point : track) {
             if (point.x < HALF_TABLE_LENGTH) {
                 second_half_points.push_back(point);
@@ -625,22 +617,22 @@ void trajectory_prediction()
         double vy = (track.front().y - track.back().y) / (track.back().t - track.front().t);
         double coming_velocity = sqrt(vx * vx + vy * vy);
 
-        // ———————————————————— 二次预测开始 ————————————————————
+
         double y_quadratic_predicted;
         double batch_prediction;
         double full_table_prediction;
         double half_table_prediction;
-        std::string mode_name;
+        enum QuadraticMode { BATCH = 0, FULL = 1, HALF = 2 };
+        QuadraticMode mode;
 
-        // 1. 批量二次预测
+
+        // test
         QuadraticPredictor qp_batch(track);
         batch_prediction = qp_batch.predict(x);
 
-        // 2. 全桌二次预测
         QuadraticPredictor qp_full(full_table_points);
         full_table_prediction = qp_full.predict(x);
 
-        // 3. 半桌二次预测
         bool half_table_valid = false;
         if (second_half_points.size() >= 5) {
             QuadraticPredictor qp_half(second_half_points);
@@ -648,46 +640,43 @@ void trajectory_prediction()
             half_table_valid = true;
         }
         else {
-            half_table_prediction = full_table_prediction; // 数据不足时使用预测
+            half_table_prediction = full_table_prediction;
         }
 
-        // 根据配置选择使用哪种预测模式
+
         switch (config.quadratic_prediction_mode) {
-        case 0: // 批量二次预测
+        case 0: // batch quadratic prediction
             y_quadratic_predicted = batch_prediction;
-            mode_name = "批量二次预测";
+            mode = BATCH;
             break;
 
-        case 1: // 全桌二次预测
+        case 1: // full-table quadratic prediction
             y_quadratic_predicted = full_table_prediction;
-            mode_name = "全桌二次预测";
+            mode = FULL;
             break;
 
-        case 2: // 半桌二次预测
+        case 2: // half-table quadratic prediction
         default:
             y_quadratic_predicted = half_table_prediction;
-            mode_name = "半桌二次预测";
+            mode = HALF;
             break;
         }
 
-        // 比较数据写文件
-        test_round++;
-        if (prediction_outfile.is_open()) {
-            prediction_outfile << test_round << ","
-                << batch_prediction << ","
-                << full_table_prediction << ","
-                << (half_table_valid ? std::to_string(half_table_prediction) : "NaN") << ";";
-            prediction_outfile.flush();
-        }
-
-        // ———————————————————— 二次预测结束 ————————————————————
 
         LinearPredictor lp(track);
         double y_linear_predicted = lp.predict(x);
         double y_predicted = y_linear_predicted * config.linear_weight_quadratic + y_quadratic_predicted * (1 - config.linear_weight_quadratic);
 
-        logger(Info, "当前选择模式[", mode_name, "] 预测结果: x=200mm时 y=", y_predicted, "mm");
-        logger(Info, "比较数据: 批量=", batch_prediction, "mm, 全桌=", full_table_prediction, "mm, 半桌=", half_table_prediction, "mm");
+        if (prediction_outfile.is_open()) {
+            prediction_outfile << stage << ","
+                << y_linear_predicted << ","
+                << batch_prediction << ","
+                << full_table_prediction << ","
+                << (half_table_valid ? half_table_prediction : "") << std::endl;
+        }
+
+        logger(Info, "mode [", mode, "] When x = 200mm, y = ", y_predicted, "mm.");
+        logger(Info, "batch = ", batch_prediction, " mm, full = ", full_table_prediction, " mm, half = ", half_table_prediction, " mm.");
 
         go_to_left = (y_predicted > 0);
 
@@ -780,11 +769,6 @@ void trajectory_prediction()
         demo.servo_move_enable(FALSE);
     }
 
-    // 循环结束后清空数据并增加测试轮次
-    second_half_points.clear();
-    full_table_points.clear();
-
-    // 关闭文件
     if (prediction_outfile.is_open()) {
         prediction_outfile.close();
     }

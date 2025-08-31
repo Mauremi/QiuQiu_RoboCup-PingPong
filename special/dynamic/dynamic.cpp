@@ -100,9 +100,6 @@ struct Config {
 
     // motor speed
     const int speed = 740; // Maximum speed for the motor
-    const int first_threshold = 1300;
-    const int second_threshold = 700;
-    const int third_threshold = 400;
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
 
@@ -575,7 +572,7 @@ void trajectory_prediction()
     uint64_t time_start, time_end;
 
     if (config.if_record_trajectory) {
-        trajectory_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_trajectory", std::ios::trunc);
+        trajectory_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_trajectory.csv", std::ios::trunc);
         if (!trajectory_outfile.is_open()) {
             logger(Error, "Failed to open trajectory CSV file.");
         }
