@@ -115,9 +115,11 @@ struct Config {
 
     // trajectory prediction
     const double linear_weight_quadratic = 0.9; // Weight for linear prediction in trajectory prediction
-
+    const int quadratic_prediction_mode = 0; // Choose among 0(batch), 1(whole), 2(half)
+    
     // IFs
-    const bool if_record_trajectory = true; // If record trajectory
+    const bool if_record_trajectory = true; 
+    const bool if_record_prediction = true;
     const bool if_vision_correction = false;
 
     // Equation
@@ -137,10 +139,12 @@ Point ball_position;
 int balls_n;
 std::mutex mtx;
 std::ofstream trajectory_outfile;
+std::ofstream prediction_outfile;
 int hitting_round = 1;
 char cmd = 'H';
 double hitting_angle = -10;
 JointValue jval, jvalH, inijval;
+int test_round = 0; // 测试轮次计数器
 
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
@@ -576,8 +580,11 @@ void trajectory_prediction()
     errno_t ret;
     uint64_t time_start, time_end;
     static std::vector<Point> second_half_points;
+    static std::vector<Point> full_table_points;
 
+    // 打开预测结果记录文件
     if (config.if_record_trajectory) {
+        // 打开记录轨迹文件
         trajectory_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_trajectory", std::ios::trunc);
         if (!trajectory_outfile.is_open()) {
             logger(Error, "Failed to open trajectory CSV file.");
@@ -585,15 +592,32 @@ void trajectory_prediction()
         trajectory_outfile << "t,x,y\n"; // Write header
     }
 
+    // 打开预测结果记录文件
+    if (config.if_record_prediction) {
+        prediction_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_prediction.csv", std::ios::app);
+        if (!prediction_outfile.is_open()) {
+            logger(Error, "Failed to open prediction comparison CSV file.");
+        }
+        else {
+            // 如果是第一次运行，写入表头
+            if (test_round == 0) {
+                prediction_outfile << "test_round,batch_prediction,full_table_prediction,half_table_prediction\n";
+            }
+        }
+    }
+    
+
     double x = 200;
     while (!is_hitting)
     {
         std::vector<Point> track = record_trajectory_before(10, time_start, time_end, config.hitting_threshold, 2740);
 
-    	for (const auto& point : track) {
+        // 收集数据点
+        for (const auto& point : track) {
             if (point.x < HALF_TABLE_LENGTH) {
                 second_half_points.push_back(point);
             }
+            full_table_points.push_back(point);
         }
 
         double coming_angle = get_ball_coming_direction(track);
@@ -601,29 +625,71 @@ void trajectory_prediction()
         double vy = (track.front().y - track.back().y) / (track.back().t - track.front().t);
         double coming_velocity = sqrt(vx * vx + vy * vy);
 
-        LinearPredictor lp(track);
-        QuadraticPredictor qp_second(second_half_points);
-
-        double y_linear_predicted = lp.predict(x);
+        // ———————————————————— 二次预测开始 ————————————————————
         double y_quadratic_predicted;
+        double batch_prediction;
+        double full_table_prediction;
+        double half_table_prediction;
+        std::string mode_name;
 
-        // try calculating y_quadratic_predicted using second_half_points
+        // 1. 批量二次预测
+        QuadraticPredictor qp_batch(track);
+        batch_prediction = qp_batch.predict(x);
+
+        // 2. 全桌二次预测
+        QuadraticPredictor qp_full(full_table_points);
+        full_table_prediction = qp_full.predict(x);
+
+        // 3. 半桌二次预测
+        bool half_table_valid = false;
         if (second_half_points.size() >= 5) {
-        	y_quadratic_predicted = qp_second.predict(x);
-            logger(Info, "Using second_half_points, size:", second_half_points.size(), "y_quadratic_predicted:", y_quadratic_predicted, "mm");
+            QuadraticPredictor qp_half(second_half_points);
+            half_table_prediction = qp_half.predict(x);
+            half_table_valid = true;
         }
         else {
-            // lack of data, calculate y_quadratic_predicted using track
-            QuadraticPredictor qp(track);
-        	y_quadratic_predicted = qp.predict(x);
-            logger(Info, "Using track, y_quadratic_predicted:", y_quadratic_predicted, "mm");
+            half_table_prediction = full_table_prediction; // 数据不足时使用预测
         }
 
+        // 根据配置选择使用哪种预测模式
+        switch (config.quadratic_prediction_mode) {
+        case 0: // 批量二次预测
+            y_quadratic_predicted = batch_prediction;
+            mode_name = "批量二次预测";
+            break;
+
+        case 1: // 全桌二次预测
+            y_quadratic_predicted = full_table_prediction;
+            mode_name = "全桌二次预测";
+            break;
+
+        case 2: // 半桌二次预测
+        default:
+            y_quadratic_predicted = half_table_prediction;
+            mode_name = "半桌二次预测";
+            break;
+        }
+
+        // 比较数据写文件
+        test_round++;
+        if (prediction_outfile.is_open()) {
+            prediction_outfile << test_round << ","
+                << batch_prediction << ","
+                << full_table_prediction << ","
+                << (half_table_valid ? std::to_string(half_table_prediction) : "NaN") << ";";
+            prediction_outfile.flush();
+        }
+
+        // ———————————————————— 二次预测结束 ————————————————————
+
+        LinearPredictor lp(track);
+        double y_linear_predicted = lp.predict(x);
         double y_predicted = y_linear_predicted * config.linear_weight_quadratic + y_quadratic_predicted * (1 - config.linear_weight_quadratic);
 
-        logger(Info, "Predicted y when x = 200 mm: ", y_predicted, " mm.");
+        logger(Info, "当前选择模式[", mode_name, "] 预测结果: x=200mm时 y=", y_predicted, "mm");
+        logger(Info, "比较数据: 批量=", batch_prediction, "mm, 全桌=", full_table_prediction, "mm, 半桌=", half_table_prediction, "mm");
 
-        go_to_left = (y_predicted > 0); // Determine if the paddle should go to the left or right based on the predicted y value
+        go_to_left = (y_predicted > 0);
 
         JointValue temp;
 
@@ -631,8 +697,7 @@ void trajectory_prediction()
         if (is_hitting) break;
         mkmotor.goToPos2(go_to_left ? -160 : -20, 1, 400, false);
 
-
-        int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice; // !!! ??
+        int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice;
         logger(Info, "Choose goal ", target_index, ".");
 
         hitting_angle = calculate_hitting_angle(x, y_predicted, goals[target_index].first, goals[target_index].second, coming_angle, coming_velocity);
@@ -668,7 +733,7 @@ void trajectory_prediction()
                         demo.kine_inverse(&inijval, &pos, &jvalH);
                         demo.joint_move(&jvalH, MoveMode::ABS, false, config.jaka_speed, 400 * Deg2Rad, 2, NULL);
                         Sleep(200);
-                        break; // Break if the inverse kinematics is successful
+                        break;
                     }
                     catch (std::runtime_error)
                     {
@@ -676,7 +741,7 @@ void trajectory_prediction()
                         if (index == 10)
                         {
                             logger(Error, "Inverse error! Cannot find a valid position.");
-                            break; // Break if we cannot find a valid position after 10 attempts
+                            break;
                         }
                     }
                 }
@@ -692,7 +757,7 @@ void trajectory_prediction()
                         demo.kine_inverse(&inijval, &pos, &jvalH);
                         demo.joint_move(&jvalH, MoveMode::ABS, false, config.jaka_speed, 400 * Deg2Rad, 2, NULL);
                         Sleep(200);
-                        break; // Break if the inverse kinematics is successful
+                        break;
                     }
                     catch (std::runtime_error)
                     {
@@ -700,12 +765,11 @@ void trajectory_prediction()
                         if (index == 10)
                         {
                             logger(Error, "Inverse error! Cannot find a valid position.");
-                            break; // Break if we cannot find a valid position after 10 attempts
+                            break;
                         }
                     }
                 }
             }
-
         }
 
         for (int aa = 0; aa < 6; aa++)
@@ -716,8 +780,17 @@ void trajectory_prediction()
         demo.servo_move_enable(FALSE);
     }
 
+    // 循环结束后清空数据并增加测试轮次
     second_half_points.clear();
+    full_table_points.clear();
 
+    // 关闭文件
+    if (prediction_outfile.is_open()) {
+        prediction_outfile.close();
+    }
+    if (trajectory_outfile.is_open()) {
+        trajectory_outfile.close();
+    }
 }
 
 void calculate_hit(int round)
