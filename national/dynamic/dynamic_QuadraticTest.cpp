@@ -579,7 +579,7 @@ void trajectory_prediction()
 
     if (config.if_record_trajectory) {
         // 打开记录轨迹文件
-        trajectory_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_trajectory.csv", std::ios::trunc);
+        trajectory_outfile.open(string(config.repo_path) + "\\national\\dynamic\\data_trajectory.csv", std::ios::trunc);
         if (!trajectory_outfile.is_open()) {
             logger(Error, "Failed to open trajectory CSV file.");
         }
@@ -587,7 +587,7 @@ void trajectory_prediction()
     }
 
     if (config.if_record_prediction) {
-        prediction_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_prediction.csv", std::ios::app);
+        prediction_outfile.open(string(config.repo_path) + "\\national\\dynamic\\data_prediction.csv", std::ios::app);
         if (!prediction_outfile.is_open()) {
             logger(Error, "Failed to open prediction comparison CSV file.");
         }
@@ -799,7 +799,7 @@ void calculate_hit(int round)
 
 void get_correction_data()
 {
-    ifstream angle_file(string(config.repo_path) + "\\special\\dynamic\\data_GoalAngle.csv");
+    ifstream angle_file(string(config.repo_path) + "\\natioal\\dynamic\\data_GoalAngle.csv");
 
     string line;
     getline(angle_file, line); // Skip the header line
@@ -920,7 +920,7 @@ void get_vision()
 
     if (config.if_vision_correction)
     {
-        ifstream correction_file(string(config.repo_path) + "\\special\\public\\visual_correction.csv");
+        ifstream correction_file(string(config.repo_path) + "\\national\\public\\visual_correction.csv");
         string line;
         getline(correction_file, line); // Skip the header line
         getline(correction_file, line); // Read the first line
