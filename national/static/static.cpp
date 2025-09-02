@@ -471,16 +471,17 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
     logger(Error, "Inverse error for all targets!");
 
 	//所有目标点的逆解都失败了，开始尝试微调球拍位置
+    double adjust_length = 1;
     if (ball_x <= 50) // 说明球在下边缘
         // 拍子落在设定位置的基础上，向击打方向微调，直到逆解成功，在此基础上打出
     {
-        for (double adjust_length = 1; adjust_length<= 10; adjust_length++)  // 每次尝试 1mm
+        for (double adjus_round = 1; adjust_round<= 10; adjust_round++)  // 每次尝试 1mm
         {
-            pos.tran.y += adjust_y * sin(hitting_angle_rad);
-			pos.tran.x += adjust_y * cos(hitting_angle_rad);
+            pos.tran.y += adjust_length * sin(hitting_angle_rad);
+			pos.tran.x += adjust_length * cos(hitting_angle_rad);
             try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_y, " mm in hitting_direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in hitting_direction.");
                 return true;
             }
             catch (std::runtime_error) {}
@@ -488,13 +489,13 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
     }
     else if (ball_y >= 220) // 说明球在左边缘
     {
-        for (double adjust_length = 1; adjust_length <= 10; adjust_length++)
+        for (double adjust_round = 1; adjust_round <= 10; adjust_round++)
         {
-            pos.tran.y += adjust_y * sin(hitting_angle_rad);
-            pos.tran.x += adjust_y * cos(hitting_angle_rad);
+            pos.tran.y += adjust_length * sin(hitting_angle_rad);
+            pos.tran.x += adjust_length * cos(hitting_angle_rad);
             try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_y, " mm in hitting_direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length*ajust_round, " mm in hitting_direction.");
                 return true;
             }
             catch (std::runtime_error) {}
@@ -503,16 +504,38 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
 	}
     else if (ball_y <= -220) //说明球在右边缘
     {
-        for (double adjust_length = 1; adjust_length <= 10; adjust_length++)
+        for (double adjust_round = 1; adjust_round <= 10; adjust_round++)
         {
-            pos.tran.y += adjust_y * sin(hitting_angle_rad);
-            pos.tran.x += adjust_y * cos(hitting_angle_rad);
+            pos.tran.y += adjust_length * sin(hitting_angle_rad);
+            pos.tran.x += adjust_length * cos(hitting_angle_rad);
             try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_y, " mm in hitting_direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in hitting_direction.");
                 return true;
             }
             catch (std::runtime_error) {}
+        }
+    else if (ball_x >= 20) //说明球在上边缘
+    {
+        for (double adjust_round = 1; adjust_round <= 10; adjust_round++)
+        {
+            pos.tran.y -= adjust_length * sin(hitting_angle_rad);
+            pos.tran.x -= adjust_length * cos(hitting_angle_rad);
+            try {
+                demo.kine_inverse(&jval, &pos, &jvalH);
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in hitting_direction.");
+                return true;
+            }
+            catch (std::runtime_error) {}
+        }
+    }
+    else //球在中线
+    {
+        if (ball_y < 0) //球在右边
+        {
+            for(double adjust_length=1;adjust_length<=10;adjust_length++)
+            {
+                pos.tran.y-=adjust
         }
     }
 
