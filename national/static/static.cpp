@@ -533,9 +533,29 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
     {
         if (ball_y < 0) //球在右边
         {
-            for(double adjust_length=1;adjust_length<=10;adjust_length++)
+            for (double adjust_round = 1; adjust_round <= 10; adjust_round++)
             {
-                pos.tran.y-=adjust
+                pos.tran.y -= adjust_length;
+            }
+            try{
+                demo.kine_inverse(&jval, &pos, &jvalH);
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in -y direction.");
+                return true;
+            }
+			catch (std::runtime_error) {}
+        }
+        else //球在左边
+        {
+            for (double adjust_round = 1; adjust_round <= 10; adjust_round++)
+            {
+                pos.tran.y += adjust_length;
+            }
+            try {
+                demo.kine_inverse(&jval, &pos, &jvalH);
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in y direction.");
+                return true;
+            }
+            catch (std::runtime_error) {}
         }
     }
 
