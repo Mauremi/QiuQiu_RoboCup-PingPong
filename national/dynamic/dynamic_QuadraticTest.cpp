@@ -711,7 +711,7 @@ void trajectory_prediction()
         {
             logger(Error, "Inverse error! Trying to move nearby.");
 
-            if (y_predicted > 300 || (y_predicted > -300 && y_predicted < 0))
+            if (y_predicted > 250 || (y_predicted > -250 && y_predicted < 0))
             {
                 int index = 0;
                 while (true)
