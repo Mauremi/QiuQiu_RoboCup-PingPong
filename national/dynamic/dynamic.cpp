@@ -42,6 +42,17 @@ using std::chrono::milliseconds;
 #define GOAL_WIDTH 80
 #define GOAL_THICKNESS 20
 
+#define GRAVITY 9800.0
+#define BALL_MASS 2.7
+#define BALL_RADIUS 20.0
+
+#define AIR_DENSITY 1.2e-9
+#define AIR_VISCOSITY 1.8e-4
+#define DRAG_COEFF 0.47
+#define BALL_AREA (3.1415926 * BALL_RADIUS * BALL_RADIUS)
+
+#define H (TABLE_HEIGHT - BUCKET_HEIGHT)
+
 
 enum Logger { Info, Error, Move, Hint, Input };
 
@@ -95,6 +106,7 @@ struct Config {
     int motor_com; // COM port for the motor
     char* repo_path;
     bool if_referee;
+    const int velocity calculating method = 1;//or 2
 
     const int goal_choice = 2;
 
@@ -102,6 +114,8 @@ struct Config {
     const int speed = 740; // Maximum speed for the motor
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
+    const double projectile_coefficient = 0.6;
+
 
     // paddle position
     const double paddle_z_left = 240, paddle_z_right = 240; // Paddle heights for left and right sides
@@ -850,9 +864,87 @@ void get_referee()
     }
     return;
 }
+double computeLandingDistance(double velocity) {
+    double k = 0.5 * AIR_DENSITY * DRAG_COEFF * BALL_AREA;  // g/mm
+    double tau = BALL_MASS / k;  // s
 
-double calculate_leaving_velocity() {
-    return 400;
+    double omega = velocity / BALL_RADIUS;  // rad/s
+    int s = -1;  // 前滚 -> Magnus 向下
+
+    auto f = [&](double y) {
+        double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
+        double term2 = s * omega * velocity * tau * tau * (1 - (y + 1) * exp(-y));
+        return term1 - term2 - H;
+        };
+
+    auto df = [&](double y) {
+        double term1 = GRAVITY * tau * tau * (1 - exp(-y));
+        double term2 = s * omega * velocity * tau * tau * (-y * exp(-y));
+        return term1 - term2;
+        };
+
+    // Newton 解 y
+    double y = 1.0;
+    for (int i = 0; i < 50; i++) {
+        double fy = f(y);
+        double dfy = df(y);
+        if (fabs(dfy) < 1e-9) break;
+        double y_new = y - fy / dfy;
+        if (fabs(y_new - y) < 1e-9) { y = y_new; break; }
+        y = y_new;
+    }
+
+    double R = velocity * tau * (1 - exp(-y));
+    return R;
+}//辅助方法二计算速度。
+
+double computeVelocityFromDistance(double distance) {
+    double low = 10.0;       // mm/s
+    double high = 10000.0;   // mm/s
+
+    for (int i = 0; i < 60; i++) {
+        double mid = 0.5 * (low + high);
+        double Rmid = computeLandingDistance(mid);
+        if (Rmid < distance) {
+            low = mid;
+        }
+        else {
+            high = mid;
+        }
+    }
+    return 0.5 * (low + high);
+}//辅助方法二计算速度。
+
+double calculate_leaving_velocity(int velocity calculating method, double ball_x, double ball_y, double target_x, double target_y) {
+        if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
+            logger(Error, "No ball detected!");
+            return 0; // No speed if no ball detected
+        }
+
+        // Calculate the speed based on the distance from the center
+        double distance = sqrt(pow(target_x - ball_x, 2) + pow(target_y - ball_y, 2));
+        double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
+
+        double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
+        double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
+        if (velocity calculating method == 1) {
+            double flight_time = sqrt(off_table_height);
+            double speed = flight_distance / flight_time;
+            double motor_speed = speed * config.velocity_factor;
+
+            logger(Info, "Motor speed: ", motor_speed* config.projectile_coefficient);
+
+            return motor_speed * config.projectile_coefficient;
+        }
+        if (velocity_calculating_method == 2) {
+            double distance = flight_distance;
+            double leaving_velocity = computeVelocityFromDistance(distance);
+            double motor_speed = leaving_velocity * config.velocity_factor;
+
+            logger(Info, "Motor speed : ", motor_speed);
+
+            return motor_speed;
+        }
 }
 
 double calculate_hitting_angle(double coming_angle,double coming_velocity,double leaving_velocity,double leaving_angle) {
