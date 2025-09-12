@@ -128,7 +128,7 @@ Point hitting_position;
 Point target;
 char cmd = 'H'; // Command for the robot
 std::mutex mtx;        // mutex for protecting shared resources
-std::ofstream offset_file(string(config.repo_path) + "\\national\\static\\data_offsets.csv", std::ios::trunc);  // 覆盖
+std::ofstream offset_file;  // 覆盖
 
 JAKAZuRobot demo;
 MotorIK mkmotor;
@@ -622,6 +622,8 @@ void read_config()
 int main()
 {
     read_config();
+    offset_file.open(string(config.repo_path) + "\\national\\static\\data_offsets.csv", std::ios::trunc);
+    offset_file << "x,y,x_offset,y_offset,point_type" << std::endl;
 
     logger(Info, "Main loop started.");
 
