@@ -468,20 +468,49 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
         catch (std::runtime_error) {}
     }
 
-    logger(Error, "Inverse error for all targets!");
+    logger(Error, "Inverse error for all targets! Try to hit target 2!");
 
-	//所有目标点的逆解都失败了，开始尝试微调球拍位置
+    //所有目标点的逆解都失败了，开始尝试微调球拍位置
+
+    target = { std::get<0>(targets[2]), std::get<1>(targets[2]), 0, 0, 0 };
+
+    logger(Info, "Trying target (", target.x, ", ", target.y, ").");
+
+    double y_offset = (ball_y > 0) ? learning_left.get_offset_y(ball_x, ball_y) : learning_right.get_offset_y(ball_x, ball_y);
+    double x_offset = (ball_y > 0) ? learning_left.get_offset_x(ball_x, ball_y) : learning_right.get_offset_x(ball_x, ball_y);
+
+    Point modified_target = { target.x + x_offset, target.y + y_offset, 0, 0, 0 }; // Apply the offset to the target
+
+    // calculate the angle to hit the ball
+    double hitting_angle = calculate_hitting_angle(ball_position.x, ball_position.y, modified_target.x, modified_target.y);
+    double hitting_angle_rad = hitting_angle * Deg2Rad;
+
+    pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(hitting_angle_rad);
+    pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(hitting_angle_rad);
+    pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
+
+    if (ball_y > 0) {
+        pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+        pos.rpy.ry = -90 * Deg2Rad;
+        pos.rpy.rz = 0;
+    }
+    else {
+        pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+        pos.rpy.ry = 90 * Deg2Rad;
+        pos.rpy.rz = 0;
+    }
     double adjust_length = 1;
+    double adjust_round;
     if (ball_x <= 50) // 说明球在下边缘
         // 拍子落在设定位置的基础上，向击打方向微调，直到逆解成功，在此基础上打出
     {
-        for (double adjus_round = 1; adjust_round<= 10; adjust_round++)  // 每次尝试 1mm
+        for (adjust_round = 1; adjust_round <= 10; adjust_round++)  // 每次尝试 1mm
         {
             pos.tran.y += adjust_length * sin(hitting_angle_rad);
-			pos.tran.x += adjust_length * cos(hitting_angle_rad);
+            pos.tran.x += adjust_length * cos(hitting_angle_rad);
             try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in hitting_direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * adjust_round, " mm in hitting_direction.");
                 return true;
             }
             catch (std::runtime_error) {}
@@ -489,41 +518,42 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
     }
     else if (ball_y >= 220) // 说明球在左边缘
     {
-        for (double adjust_round = 1; adjust_round <= 10; adjust_round++)
+        for (adjust_round = 1; adjust_round <= 10; adjust_round++)
         {
             pos.tran.y += adjust_length * sin(hitting_angle_rad);
             pos.tran.x += adjust_length * cos(hitting_angle_rad);
             try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_length*ajust_round, " mm in hitting_direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * adjust_round, " mm in hitting_direction.");
                 return true;
             }
             catch (std::runtime_error) {}
         }
-        
-	}
+
+    }
     else if (ball_y <= -220) //说明球在右边缘
     {
-        for (double adjust_round = 1; adjust_round <= 10; adjust_round++)
+        for (adjust_round = 1; adjust_round <= 10; adjust_round++)
         {
             pos.tran.y += adjust_length * sin(hitting_angle_rad);
             pos.tran.x += adjust_length * cos(hitting_angle_rad);
             try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in hitting_direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * adjust_round, " mm in hitting_direction.");
                 return true;
             }
             catch (std::runtime_error) {}
         }
+    }
     else if (ball_x >= 20) //说明球在上边缘
     {
-        for (double adjust_round = 1; adjust_round <= 10; adjust_round++)
+        for (adjust_round = 1; adjust_round <= 10; adjust_round++)
         {
             pos.tran.y -= adjust_length * sin(hitting_angle_rad);
             pos.tran.x -= adjust_length * cos(hitting_angle_rad);
             try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in hitting_direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * adjust_round, " mm in hitting_direction.");
                 return true;
             }
             catch (std::runtime_error) {}
@@ -537,12 +567,12 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
             {
                 pos.tran.y -= adjust_length;
             }
-            try{
+            try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in -y direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * adjust_round, " mm in -y direction.");
                 return true;
             }
-			catch (std::runtime_error) {}
+            catch (std::runtime_error) {}
         }
         else //球在左边
         {
@@ -552,7 +582,7 @@ bool hit_enumeration(double ball_x, double ball_y, CartesianPose& pos, JointValu
             }
             try {
                 demo.kine_inverse(&jval, &pos, &jvalH);
-                logger(Info, "Inverse succeeded after adjusting +", adjust_length * ajust_round, " mm in y direction.");
+                logger(Info, "Inverse succeeded after adjusting +", adjust_length * adjust_round, " mm in y direction.");
                 return true;
             }
             catch (std::runtime_error) {}
