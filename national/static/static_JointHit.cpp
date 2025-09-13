@@ -133,6 +133,10 @@ struct Adjustment
     double ball_distance;
     double prepare_distance;
     double prepare_vertical;
+	int ball_distance_x_sign;
+	int ball_distance_y_sign;	
+	int prepare_vertical_x_sign;
+	int prepare_vertical_y_sign;
 };
 
 Point ball_position;         // location of the ball
@@ -428,12 +432,16 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
 
     if (ball_x < 100) //球在下边缘
     {
+		adjust.ball_distance_x_sign = 1;
+        adjust.ball_distance_y_sign = 1;
+		adjust.prepare_vertical_x_sign = ball_y > 0 ? -1 : 1;
+		adjust.prepare_vertical_y_sign = ball_y > 0 ? 1 : -1;
         //先确定终点的位置
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
         {
-            ball_x += adjust.ball_distance * cos(hitting_angle_rad);
-            ball_y += adjust.ball_distance * sin(hitting_angle_rad);
+            ball_x += adjust.ball_distance * cos(hitting_angle_rad)*adjust.ball_distance_x_sign;
+            ball_y += adjust.ball_distance * sin(hitting_angle_rad)*adjust.ball_distance_y_sign;
             CartesianPose pos_terminal;
             pos_terminal.tran.x = ball_x - hitting_distance * cos(hitting_angle_rad);
             pos_terminal.tran.y = ball_y - hitting_distance * sin(hitting_angle_rad);
@@ -492,8 +500,8 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         {
             //try to inverse
             CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad);
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad);
+            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad)*adjust.prepare_vertical_x_sign;
+            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad)*adjust.prepare_vertical_y_sign;
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
                 pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
@@ -518,12 +526,16 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
     }
     if (ball_x >= 200) //球在上边缘
     {
+        adjust.ball_distance_x_sign = -1;
+        adjust.ball_distance_y_sign = -1;
+        adjust.prepare_vertical_x_sign = ball_y > 0 ? 1 : -1;
+        adjust.prepare_vertical_y_sign = ball_y > 0 ? -1 : 1;
         //确定调整终点
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance = +1)
         {
-            ball_x -= adjust.ball_distance * cos(hitting_angle_rad);
-            ball_y -= adjust.ball_distance * sin(hitting_angle_rad);
+            ball_x += adjust.ball_distance * cos(hitting_angle_rad)*adjust.ball_distance_x_sign;
+            ball_y += adjust.ball_distance * sin(hitting_angle_rad)*adjust.ball_distance_y_sign;
             //try to inverse
             CartesianPose pos_terminal;
             pos_terminal.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad);
@@ -582,8 +594,8 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         {
             //try to inverse
             CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) - adjust.prepare_vertical * sin(hitting_angle_rad);
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad);
+            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad)*adjust.prepare_vertical_x_sign;
+            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad)*adjust.prepare_vertical_y_sign;
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
                 pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
@@ -603,14 +615,19 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             }
             catch (std::runtime_error) { continue; }
         }
+		return false;
     }
     if (ball_y > 300) //球在左边缘
     {
+        adjust.ball_distance_x_sign = 1;
+        adjust.ball_distance_y_sign = -1;
+        adjust.prepare_vertical_x_sign = 1
+        adjust.prepare_vertical_y_sign = -1;
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
         {
-            ball_x += adjust.ball_distance * cos(hitting_angle_rad);
-            ball_y -= adjust.ball_distance * sin(hitting_angle_rad);
+            ball_x += adjust.ball_distance * cos(hitting_angle_rad)*adjust.ball_distance_x_sign;
+            ball_y += adjust.ball_distance * sin(hitting_angle_rad)*adjust.ball_distance_y_sign;
             //try to inverse
             CartesianPose pos_terminal;
             pos_terminal.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad);
@@ -667,8 +684,8 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         {
             //try to inverse
             CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad);
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad);
+            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad)*adjust.prepare_vertical_x_sign;
+            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad)*adjust.prepare_vertical_y_sign;
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
                 pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
@@ -692,12 +709,16 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
     }
     if (ball_y < -300) //球在右边缘
     {
+        adjust.ball_distance_x_sign = 1;
+        adjust.ball_distance_y_sign = 1;
+        adjust.prepare_vertical_x_sign = 1;
+        adjust.prepare_vertical_y_sign = 1;
         //确定终点位置    
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
         {
-            ball_x += adjust.ball_distance * cos(hitting_angle_rad);
-            ball_y += adjust.ball_distance * sin(hitting_angle_rad);
+            ball_x += adjust.ball_distance * cos(hitting_angle_rad)*adjust.ball_distance_x_sign;
+            ball_y += adjust.ball_distance * sin(hitting_angle_rad)*adjust.ball_distance_y_sign;
             //try to inverse
             CartesianPose pos_terminal;
             pos_terminal.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad);
@@ -755,8 +776,8 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         {
             //try to inverse
             CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad);
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad);
+            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad)*adjust.prepare_vertical_x_sign;
+            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad)*adjust.prepare_vertical_y_sign;
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
                 pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
@@ -777,6 +798,7 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             catch (std::runtime_error) { continue; }
             return false;
         }
+		return false;
     }
 
 }
