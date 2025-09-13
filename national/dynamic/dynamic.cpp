@@ -106,7 +106,7 @@ struct Config {
     int motor_com; // COM port for the motor
     char* repo_path;
     bool if_referee;
-    const int velocity calculating method = 1;//or 2
+    const int velocity_calculating_method = 1;//or 2
 
     const int goal_choice = 2;
 
@@ -915,39 +915,39 @@ double computeVelocityFromDistance(double distance) {
     return 0.5 * (low + high);
 }//辅助方法二计算速度。
 
-double calculate_leaving_velocity(int velocity calculating method, double ball_x, double ball_y, double target_x, double target_y) {
-        if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
-            logger(Error, "No ball detected!");
-            return 0; // No speed if no ball detected
-        }
+double calculate_leaving_velocity(int velocity_calculating_method, double ball_x, double ball_y, double target_x, double target_y) {
+    if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
+        logger(Error, "No ball detected!");
+        return 0; // No speed if no ball detected
+    }
 
-        // Calculate the speed based on the distance from the center
-        double distance = sqrt(pow(target_x - ball_x, 2) + pow(target_y - ball_y, 2));
-        double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
+    // Calculate the speed based on the distance from the center
+    double distance = sqrt(pow(target_x - ball_x, 2) + pow(target_y - ball_y, 2));
+    double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
 
-        double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
-        double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
-        if (velocity calculating method == 1) {
-            double flight_time = sqrt(off_table_height);
-            double speed = flight_distance / flight_time;
-            double motor_speed = speed * config.velocity_factor;
+    double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
+    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
+    if (velocity_calculating_method == 1) {
+        double flight_time = sqrt(off_table_height);
+        double speed = flight_distance / flight_time;
+        double motor_speed = speed * config.velocity_factor;
 
-            logger(Info, "Motor speed: ", motor_speed* config.projectile_coefficient);
+        logger(Info, "Motor speed: ", motor_speed * config.projectile_coefficient);
 
-            return motor_speed * config.projectile_coefficient;
-        }
-        if (velocity_calculating_method == 2) {
-            double distance = flight_distance;
-            double leaving_velocity = computeVelocityFromDistance(distance);
-            double motor_speed = leaving_velocity * config.velocity_factor;
+        return motor_speed * config.projectile_coefficient;
+    }
+    if (velocity_calculating_method == 2) {
+        double distance = flight_distance;
+        double leaving_velocity = computeVelocityFromDistance(distance);
+        double motor_speed = leaving_velocity * config.velocity_factor;
 
-            logger(Info, "Motor speed : ", motor_speed);
+        logger(Info, "Motor speed : ", motor_speed);
 
-            return motor_speed;
-        }
+        return motor_speed;
+    }
 }
 
-double calculate_hitting_angle(double coming_angle,double coming_velocity,double leaving_velocity,double leaving_angle) {
+double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle) {
 
     double numerator = leaving_velocity_ * std::sin(leaving_angle_)
         + (5.0 / 7.0) * coming_velocity_ * std::sin(coming_angle_);
@@ -958,13 +958,13 @@ double calculate_hitting_angle(double coming_angle,double coming_velocity,double
     return phi;
 }
 
-double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle,double e) {
+double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e) {
     // 基本健壮性检查：1 + e 不能为 0
     static_assert(e > -1.0, "Invalid restitution: 1 + e must not be zero or negative.");
     double phi = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
     const double numerator =
-        leaving_velocity * std::cos(leaving_angle -phi)
-        - e * coming_velocity * std::cos(phi- coming_angle);
+        leaving_velocity * std::cos(leaving_angle - phi)
+        - e * coming_velocity * std::cos(phi - coming_angle);
 
     const double denominator = 1.0 + e;
 
