@@ -814,7 +814,7 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     can_hit = inverse_ensure(hitting_distance, preparing_distance, adjust, motor_speed, ball_x, ball_y, hitting_angle);
     preparing_distance -= adjust.prepare_distance;
     ball_x = ball_x + adjust.ball_distance * cos(hitting_angle * Deg2Rad) * adjust.ball_distance_x_sign + adjust.prepare_vertical_x_sign * sin(hitting_angle * Deg2Rad) * adjust.prepare_vertical;
-    ball_y = ball_x + adjust.ball_distance * sin(hitting_angle * Deg2Rad) * adjust.ball_distance_y_sign + adjust.prepare_vertical_y_sign * cos(hitting_angle * Deg2Rad) * adjust.prepare_vertical;
+    ball_y = ball_y + adjust.ball_distance * sin(hitting_angle * Deg2Rad) * adjust.ball_distance_y_sign + adjust.prepare_vertical_y_sign * cos(hitting_angle * Deg2Rad) * adjust.prepare_vertical;
 
     double hitting_angle_rad = hitting_angle * Deg2Rad;
 
