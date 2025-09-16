@@ -52,7 +52,6 @@ using std::chrono::milliseconds;
 #define BALL_AREA (3.1415926 * BALL_RADIUS * BALL_RADIUS)
 #define TABLE_HEIGHT 760
 #define BUCKET_HEIGHT 100
-#define H (TABLE_HEIGHT - BUCKET_HEIGHT)
 
 
 enum Logger { Info, Error, Move, Hint, Input };
@@ -112,7 +111,7 @@ struct Config {
     const int goal_choice = 2;
 
     // motor speed
-    const int speed = 740; // Maximum speed for the motor
+    int speed = 740; // Maximum speed for the motor
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
     const double projectile_coefficient = 0.6;
@@ -283,6 +282,19 @@ uint64_t get_current_time_microseconds()
     return microseconds;
 }
 
+double calculate_leaving_angle(double ball_x, double ball_y, double posi_x, double posi_y)
+{
+    double run_x = posi_x - ball_x;
+    double run_y = posi_y - ball_y;
+
+    double angle_rad = atan2(run_y, run_x);
+    double angle_deg = angle_rad * Rad2Deg;
+
+    logger(Info, "Calculated angle: ", angle_deg, " degrees.");
+
+    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+}
+
 double get_distance(double ball_x, double ball_y, double posi_x, double posi_y)
 {
     double sqr = (ball_x - posi_x) * (ball_x - posi_x) + (ball_y - posi_y) * (ball_y - posi_y);
@@ -319,7 +331,10 @@ double get_ball_coming_direction(std::vector<Point> balls)
     double angle_degrees = angle_radians * Rad2Deg;
     return angle_degrees;
 }
-
+double coming_angle;
+double coming_velocity;
+double leaving_angle;
+double leaving_velocity;
 // Check if the ball is moving toward the robot
 // !!! Maybe about to modify
 bool is_ball_moving_toward_robot()
@@ -485,6 +500,7 @@ double computeLandingDistance(double velocity) {
     auto f = [&](double y) {
         double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
         double term2 = s * omega * velocity * tau * tau * (1 - (y + 1) * exp(-y));
+        double H = TABLE_HEIGHT - BUCKET_HEIGHT;
         return term1 - term2 - H;
         };
 
@@ -546,7 +562,7 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
         logger(Info, "Motor speed: ", motor_speed * config.projectile_coefficient);
 
         return motor_speed * config.projectile_coefficient;
-    }
+    }//平抛计算距离
     if (velocity_calculating_method == 2) {
         double distance = flight_distance;
         double leaving_velocity = computeVelocityFromDistance(distance);
@@ -555,7 +571,7 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
         logger(Info, "Motor speed : ", motor_speed);
 
         return motor_speed;
-    }
+    }//空气动力学计算距离
 }
 
 double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle) {
@@ -567,7 +583,7 @@ double calculate_hitting_angle(double coming_angle, double coming_velocity, doub
 
     double phi = std::atan2(numerator, denominator);
     return phi;
-}
+}//计算击球角度
 
 double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e) {
 
@@ -579,7 +595,7 @@ double calculate_hitting_velocity(double coming_angle, double coming_velocity, d
     const double denominator = 1.0 + e;
 
     return numerator / denominator; //返回vp
-}
+}//计算击球速度
 
 
 
@@ -601,10 +617,10 @@ void trajectory_prediction()
     {
         std::vector<Point> track = record_trajectory_before(10, time_start, time_end, config.hitting_threshold, 2740);
 
-        double coming_angle = get_ball_coming_direction(track);
+        coming_angle = get_ball_coming_direction(track);
         double vx = (track.front().x - track.back().x) / (track.back().t - track.front().t);
         double vy = (track.front().y - track.back().y) / (track.back().t - track.front().t);
-        double coming_velocity = sqrt(vx * vx + vy * vy);
+        coming_velocity = sqrt(vx * vx + vy * vy);
 
         LinearPredictor lp(track);
         QuadraticPredictor qp(track);
@@ -627,7 +643,9 @@ void trajectory_prediction()
         int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice; // !!! ??
         logger(Info, "Choose goal ", target_index, ".");
 
-        hitting_angle = calculate_hitting_angle(x, y_predicted, goals[target_index].first, goals[target_index].second);
+        leaving_angle = calculate_leaving_angle(x, y_predicted, goals[target_index].first, goals[target_index].second);
+        hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
+        leaving_velocity = calculate_leaving_velocity(2, x, y_predicted, goals[target_index].first, goals[target_index].second);
 
         CartesianPose pos;
         pos.tran.x = x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad) + config.jaka_offset_x;
@@ -720,6 +738,7 @@ void calculate_hit(int round)
     // hitting!
     while (ball_position.x >= config.hitting_threshold && cmd == 'k') {} // Wait for the ball to reach hitting position
     is_hitting = true;
+    config.speed = calculate_hitting_velocity(coming_angle, coming_velocity, leaving_velocity, leaving_angle, 0.8);
     mkmotor.goToPos2(go_to_left ? -270 : 90, 1, config.speed, false);
     logger(Info, "Motor will hit when ball.x is ", ball_position.x);
 
