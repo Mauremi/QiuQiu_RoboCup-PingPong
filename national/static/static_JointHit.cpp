@@ -38,7 +38,7 @@ using std::chrono::milliseconds;
 
 #define TABLE_LENGTH 2740
 #define TABLE_WIDTH 1525
-#define SANDBOX_HEIGHT 40
+#define SANDBOX_HEIGHT 100
 #define GRAVITY 9796.7 // Gravity constant in mm/s^2
 
 enum Logger { Info, Error, Move, Hint, Input };
@@ -92,7 +92,7 @@ struct Config {
     bool if_referee;
 
     // speed
-    const double velocity_factor = 34.5; // velocity shift factor 35.5 for second targets
+    const double velocity_factor = 40; // velocity shift factor 35.5 for second targets
     const int jaka_speed = 620;
     const int jaka_acceleration = 4000;
 
@@ -824,12 +824,12 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
     pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
     if (ball_y > 0) {
-        pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+        pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
         pos_preparing.rpy.ry = -90 * Deg2Rad;
         pos_preparing.rpy.rz = 0;
     }
     else {
-        pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+        pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
         pos_preparing.rpy.ry = 90 * Deg2Rad;
         pos_preparing.rpy.rz = 0;
     }
@@ -849,12 +849,12 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     pos_hitting.tran.y = ball_y - (2 * hitting_distance - preparing_distance) * sin(hitting_angle_rad);
     pos_hitting.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
     if (ball_y > 0) {
-        pos_hitting.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+        pos_hitting.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
         pos_hitting.rpy.ry = -90 * Deg2Rad;
         pos_hitting.rpy.rz = 0;
     }
     else {
-        pos_hitting.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+        pos_hitting.rpy.rx = (90 - hitting_angle) * Deg2Rad;
         pos_hitting.rpy.ry = 90 * Deg2Rad;
         pos_hitting.rpy.rz = 0;
     }
@@ -869,16 +869,18 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     else
         jaka_reaching_time = sqrt(2.0 * (preparing_distance - hitting_distance) / config.jaka_acceleration); // Time to reach hitting position
 
-    double motor_reaching_time = 180 / motor_speed; // Time for motor to reach hitting position
+    double motor_reaching_time = 90 / motor_speed; // Time for motor to reach hitting position
 
     if (jaka_reaching_time > motor_reaching_time)
     {
+        logger(Info, "Jaka mini move first.");
         demo.linear_move(&pos_hitting, MoveMode::ABS, false, config.jaka_speed, config.jaka_acceleration, 5, nullptr);
         Sleep((int)((jaka_reaching_time - motor_reaching_time) * 1000));
         mkmotor.goToPos2((ball_y > 0) ? -270 : 90, 0, motor_speed, false); // !DIRECTION
     }
     else
     {
+        logger(Info, "Motor move first.");
         mkmotor.goToPos2((ball_y > 0) ? -270 : 90, 0, motor_speed, false); // !DIRECTION
         Sleep((int)((motor_reaching_time - jaka_reaching_time) * 1000));
         demo.linear_move(&pos_hitting, MoveMode::ABS, false, config.jaka_speed, config.jaka_acceleration, 5, nullptr);
@@ -975,7 +977,7 @@ int main()
 
     errno_t ret = ERR_SUCC;
     logger(Move, "Jaka mini initializing.");
-    ret = demo.joint_move(&jval, MoveMode::ABS, true, 5);
+    ret = demo.joint_move(&jval, MoveMode::ABS, true, 1);
 
     logger(Move, "Motor initializing.");
     double ini_dianji_degree = 0;
