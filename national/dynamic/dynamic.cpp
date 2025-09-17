@@ -87,16 +87,13 @@ void logger(Logger l, const Args&... args) {
 }
 
 
-std::map<int, std::pair<double, double>> goals = {
-    {1, {TABLE_LENGTH - GOAL_THICKNESS,  725}},
-    {2, {TABLE_LENGTH - GOAL_THICKNESS,  540}},
-    {3, {TABLE_LENGTH - GOAL_THICKNESS,  360}},
-    {4, {TABLE_LENGTH - GOAL_THICKNESS,  180}},
-    {5, {TABLE_LENGTH - GOAL_THICKNESS,    0}},
-    {6, {TABLE_LENGTH - GOAL_THICKNESS, -180}},
-    {7, {TABLE_LENGTH - GOAL_THICKNESS, -360}},
-    {8, {TABLE_LENGTH - GOAL_THICKNESS, -540}},
-    {9, {TABLE_LENGTH - GOAL_THICKNESS, -725}},
+std::map<int, std::pair<double, double>> targets = {
+    {1, {TABLE_LENGTH + 280,  560}},
+    {2, {TABLE_LENGTH + 280,  0}},
+    {3, {TABLE_LENGTH + 280, -560}},
+    {4, {TABLE_LENGTH + 540,  250}},
+    {5, {TABLE_LENGTH + 540, -250}},
+    {6, {TABLE_LENGTH + 780,  0}}
 };
 // No, x, y, score
 
@@ -643,9 +640,9 @@ void trajectory_prediction()
         int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice; // !!! ??
         logger(Info, "Choose goal ", target_index, ".");
 
-        leaving_angle = calculate_leaving_angle(x, y_predicted, goals[target_index].first, goals[target_index].second);
+        leaving_angle = calculate_leaving_angle(x, y_predicted, targets[target_index].first, targets[target_index].second);
         hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
-        leaving_velocity = calculate_leaving_velocity(2, x, y_predicted, goals[target_index].first, goals[target_index].second);
+        leaving_velocity = calculate_leaving_velocity(2, x, y_predicted, targets[target_index].first, targets[target_index].second);
 
         CartesianPose pos;
         pos.tran.x = x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad) + config.jaka_offset_x;
