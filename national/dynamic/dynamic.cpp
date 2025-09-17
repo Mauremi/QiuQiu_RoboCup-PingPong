@@ -50,8 +50,8 @@ using std::chrono::milliseconds;
 #define AIR_VISCOSITY 1.8e-4
 #define DRAG_COEFF 0.47
 #define BALL_AREA (3.1415926 * BALL_RADIUS * BALL_RADIUS)
-
-#define H (TABLE_HEIGHT - BUCKET_HEIGHT)
+#define TABLE_HEIGHT 760
+#define BUCKET_HEIGHT 100
 
 
 enum Logger { Info, Error, Move, Hint, Input };
@@ -111,14 +111,16 @@ struct Config {
     const int goal_choice = 2;
 
     // motor speed
-    const int speed = 740; // Maximum speed for the motor
+    int speed = 740; // Maximum speed for the motor
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
     const double projectile_coefficient = 0.6;
+    const double velocity_factor = 0.6;
 
 
     // paddle position
     const double paddle_z_left = 240, paddle_z_right = 240; // Paddle heights for left and right sides
+    const double table_height_left = 760, table_height_right = 760;
     const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
     const double jaka_offset_x = 0, jaka_offset_y = -10;
     double jaka_angle_left, jaka_angle_right;
@@ -280,6 +282,19 @@ uint64_t get_current_time_microseconds()
     return microseconds;
 }
 
+double calculate_leaving_angle(double ball_x, double ball_y, double posi_x, double posi_y)
+{
+    double run_x = posi_x - ball_x;
+    double run_y = posi_y - ball_y;
+
+    double angle_rad = atan2(run_y, run_x);
+    double angle_deg = angle_rad * Rad2Deg;
+
+    logger(Info, "Calculated angle: ", angle_deg, " degrees.");
+
+    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+}
+
 double get_distance(double ball_x, double ball_y, double posi_x, double posi_y)
 {
     double sqr = (ball_x - posi_x) * (ball_x - posi_x) + (ball_y - posi_y) * (ball_y - posi_y);
@@ -316,7 +331,10 @@ double get_ball_coming_direction(std::vector<Point> balls)
     double angle_degrees = angle_radians * Rad2Deg;
     return angle_degrees;
 }
-
+double coming_angle;
+double coming_velocity;
+double leaving_angle;
+double leaving_velocity;
 // Check if the ball is moving toward the robot
 // !!! Maybe about to modify
 bool is_ball_moving_toward_robot()
@@ -472,6 +490,113 @@ void record_trajectory_after() {
     trajectory_outfile.close();  // close the file
 }
 
+double computeLandingDistance(double velocity) {
+    double k = 0.5 * AIR_DENSITY * DRAG_COEFF * BALL_AREA;  // g/mm
+    double tau = BALL_MASS / k;  // s
+
+    double omega = velocity / BALL_RADIUS;  // rad/s
+    int s = -1;  // 前滚 -> Magnus 向下
+
+    auto f = [&](double y) {
+        double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
+        double term2 = s * omega * velocity * tau * tau * (1 - (y + 1) * exp(-y));
+        double H = TABLE_HEIGHT - BUCKET_HEIGHT;
+        return term1 - term2 - H;
+        };
+
+    auto df = [&](double y) {
+        double term1 = GRAVITY * tau * tau * (1 - exp(-y));
+        double term2 = s * omega * velocity * tau * tau * (-y * exp(-y));
+        return term1 - term2;
+        };
+
+    // Newton 解 y
+    double y = 1.0;
+    for (int i = 0; i < 50; i++) {
+        double fy = f(y);
+        double dfy = df(y);
+        if (fabs(dfy) < 1e-9) break;
+        double y_new = y - fy / dfy;
+        if (fabs(y_new - y) < 1e-9) { y = y_new; break; }
+        y = y_new;
+    }
+
+    double R = velocity * tau * (1 - exp(-y));
+    return R;
+}//辅助方法二计算速度。
+
+double computeVelocityFromDistance(double distance) {
+    double low = 10.0;       // mm/s
+    double high = 10000.0;   // mm/s
+
+    for (int i = 0; i < 60; i++) {
+        double mid = 0.5 * (low + high);
+        double Rmid = computeLandingDistance(mid);
+        if (Rmid < distance) {
+            low = mid;
+        }
+        else {
+            high = mid;
+        }
+    }
+    return 0.5 * (low + high);
+}//辅助方法二计算速度。
+
+double calculate_leaving_velocity(int velocity_calculating_method, double ball_x, double ball_y, double target_x, double target_y) {
+    if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
+        logger(Error, "No ball detected!");
+        return 0; // No speed if no ball detected
+    }
+
+    // Calculate the speed based on the distance from the center
+    double distance = sqrt(pow(target_x - ball_x, 2) + pow(target_y - ball_y, 2));
+    double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
+
+    double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
+    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
+    if (velocity_calculating_method == 1) {
+        double flight_time = sqrt(off_table_height);
+        double speed = flight_distance / flight_time;
+        double motor_speed = speed * config.velocity_factor;
+
+        logger(Info, "Motor speed: ", motor_speed * config.projectile_coefficient);
+
+        return motor_speed * config.projectile_coefficient;
+    }//平抛计算距离
+    if (velocity_calculating_method == 2) {
+        double distance = flight_distance;
+        double leaving_velocity = computeVelocityFromDistance(distance);
+        double motor_speed = leaving_velocity * config.velocity_factor;
+
+        logger(Info, "Motor speed : ", motor_speed);
+
+        return motor_speed;
+    }//空气动力学计算距离
+}
+
+double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle) {
+
+    double numerator = leaving_velocity * std::sin(leaving_angle)
+        + (5.0 / 7.0) * coming_velocity * std::sin(coming_angle);
+    double denominator = leaving_velocity * std::cos(leaving_angle)
+        + (5.0 / 7.0) * coming_velocity * std::cos(coming_angle);
+
+    double phi = std::atan2(numerator, denominator);
+    return phi;
+}//计算击球角度
+
+double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e) {
+
+    double phi = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
+    const double numerator =
+        leaving_velocity * std::cos(leaving_angle - phi)
+        - e * coming_velocity * std::cos(phi - coming_angle);
+
+    const double denominator = 1.0 + e;
+
+    return numerator / denominator; //返回vp
+}//计算击球速度
+
 
 
 void trajectory_prediction()
@@ -492,10 +617,10 @@ void trajectory_prediction()
     {
         std::vector<Point> track = record_trajectory_before(10, time_start, time_end, config.hitting_threshold, 2740);
 
-        double coming_angle = get_ball_coming_direction(track);
+        coming_angle = get_ball_coming_direction(track);
         double vx = (track.front().x - track.back().x) / (track.back().t - track.front().t);
         double vy = (track.front().y - track.back().y) / (track.back().t - track.front().t);
-        double coming_velocity = sqrt(vx * vx + vy * vy);
+        coming_velocity = sqrt(vx * vx + vy * vy);
 
         LinearPredictor lp(track);
         QuadraticPredictor qp(track);
@@ -518,7 +643,9 @@ void trajectory_prediction()
         int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice; // !!! ??
         logger(Info, "Choose goal ", target_index, ".");
 
-        hitting_angle = calculate_hitting_angle(x, y_predicted, goals[target_index].first, goals[target_index].second, coming_angle, coming_velocity);
+        leaving_angle = calculate_leaving_angle(x, y_predicted, goals[target_index].first, goals[target_index].second);
+        hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
+        leaving_velocity = calculate_leaving_velocity(2, x, y_predicted, goals[target_index].first, goals[target_index].second);
 
         CartesianPose pos;
         pos.tran.x = x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad) + config.jaka_offset_x;
@@ -611,6 +738,7 @@ void calculate_hit(int round)
     // hitting!
     while (ball_position.x >= config.hitting_threshold && cmd == 'k') {} // Wait for the ball to reach hitting position
     is_hitting = true;
+    config.speed = calculate_hitting_velocity(coming_angle, coming_velocity, leaving_velocity, leaving_angle, 0.8);
     mkmotor.goToPos2(go_to_left ? -270 : 90, 1, config.speed, false);
     logger(Info, "Motor will hit when ball.x is ", ball_position.x);
 
@@ -863,110 +991,4 @@ void get_referee()
         }
     }
     return;
-}
-double computeLandingDistance(double velocity) {
-    double k = 0.5 * AIR_DENSITY * DRAG_COEFF * BALL_AREA;  // g/mm
-    double tau = BALL_MASS / k;  // s
-
-    double omega = velocity / BALL_RADIUS;  // rad/s
-    int s = -1;  // 前滚 -> Magnus 向下
-
-    auto f = [&](double y) {
-        double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
-        double term2 = s * omega * velocity * tau * tau * (1 - (y + 1) * exp(-y));
-        return term1 - term2 - H;
-        };
-
-    auto df = [&](double y) {
-        double term1 = GRAVITY * tau * tau * (1 - exp(-y));
-        double term2 = s * omega * velocity * tau * tau * (-y * exp(-y));
-        return term1 - term2;
-        };
-
-    // Newton 解 y
-    double y = 1.0;
-    for (int i = 0; i < 50; i++) {
-        double fy = f(y);
-        double dfy = df(y);
-        if (fabs(dfy) < 1e-9) break;
-        double y_new = y - fy / dfy;
-        if (fabs(y_new - y) < 1e-9) { y = y_new; break; }
-        y = y_new;
-    }
-
-    double R = velocity * tau * (1 - exp(-y));
-    return R;
-}//辅助方法二计算速度。
-
-double computeVelocityFromDistance(double distance) {
-    double low = 10.0;       // mm/s
-    double high = 10000.0;   // mm/s
-
-    for (int i = 0; i < 60; i++) {
-        double mid = 0.5 * (low + high);
-        double Rmid = computeLandingDistance(mid);
-        if (Rmid < distance) {
-            low = mid;
-        }
-        else {
-            high = mid;
-        }
-    }
-    return 0.5 * (low + high);
-}//辅助方法二计算速度。
-
-double calculate_leaving_velocity(int velocity_calculating_method, double ball_x, double ball_y, double target_x, double target_y) {
-    if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
-        logger(Error, "No ball detected!");
-        return 0; // No speed if no ball detected
-    }
-
-    // Calculate the speed based on the distance from the center
-    double distance = sqrt(pow(target_x - ball_x, 2) + pow(target_y - ball_y, 2));
-    double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
-
-    double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
-    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
-    if (velocity_calculating_method == 1) {
-        double flight_time = sqrt(off_table_height);
-        double speed = flight_distance / flight_time;
-        double motor_speed = speed * config.velocity_factor;
-
-        logger(Info, "Motor speed: ", motor_speed * config.projectile_coefficient);
-
-        return motor_speed * config.projectile_coefficient;
-    }
-    if (velocity_calculating_method == 2) {
-        double distance = flight_distance;
-        double leaving_velocity = computeVelocityFromDistance(distance);
-        double motor_speed = leaving_velocity * config.velocity_factor;
-
-        logger(Info, "Motor speed : ", motor_speed);
-
-        return motor_speed;
-    }
-}
-
-double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle) {
-
-    double numerator = leaving_velocity_ * std::sin(leaving_angle_)
-        + (5.0 / 7.0) * coming_velocity_ * std::sin(coming_angle_);
-    double denominator = leaving_velocity_ * std::cos(leaving_angle_)
-        + (5.0 / 7.0) * coming_velocity_ * std::cos(coming_angle_);
-
-    double phi = std::atan2(numerator, denominator);
-    return phi;
-}
-
-double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e) {
-    // 基本健壮性检查：1 + e 不能为 0
-    static_assert(e > -1.0, "Invalid restitution: 1 + e must not be zero or negative.");
-    double phi = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
-    const double numerator =
-        leaving_velocity * std::cos(leaving_angle - phi)
-        - e * coming_velocity * std::cos(phi - coming_angle);
-
-    const double denominator = 1.0 + e;
-
-    return numerator / denominator; //返回vp
 }
