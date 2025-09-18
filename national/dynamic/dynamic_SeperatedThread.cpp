@@ -112,7 +112,7 @@ struct Config {
 
     // trajectory prediction
     const double linear_weight_quadratic = 0.9; // Weight for linear prediction in trajectory prediction
-    const int quadratic_prediction_mode = 0; // Choose among 0(batch), 1(whole), 2(half)
+    const int quadratic_prediction_mode = 1; // Choose among 0(batch), 1(whole), 2(half)
 
     // IFs
     const bool if_record_trajectory = true;
@@ -132,18 +132,83 @@ struct Point
     double t; // time
 };
 
-Point ball_position;
-int balls_n;
-std::mutex mtx;
+template<typename T, size_t Capacity>
+class SafeRingBuffer {
+    std::deque<T> buffer;
+    std::mutex mtx;
+
+public:
+    void push(const T& value) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (buffer.size() >= Capacity)
+            buffer.pop_front();
+        buffer.push_back(value);
+    }
+
+    std::vector<T> snapshot() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return { buffer.begin(), buffer.end() };
+    }
+
+    bool empty() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return buffer.empty();
+    }
+
+    T back() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return buffer.back();
+    }
+
+    void clear()
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        buffer.clear();
+    }
+};
+
+template<typename T>
+class SafeValue
+{
+private:
+    T data;
+    mutable std::mutex mtx; // mutable 允许 const 函数加锁
+
+public:
+    SafeValue() : data{} {}  // 默认初始化
+    SafeValue(const T& value) : data(value) {}
+
+    // 设置整个值
+    void set(const T& value) {
+        std::lock_guard<std::mutex> lock(mtx);
+        data = value;
+    }
+
+    // 获取副本
+    T get() const {
+        std::lock_guard<std::mutex> lock(mtx);
+        return data;
+    }
+};
+
 std::ofstream trajectory_outfile;
 std::ofstream prediction_outfile;
-int hitting_round = 1;
-char cmd = 'H';
-double hitting_angle = -10;
+SafeRingBuffer<Point, 100> half_table_points;
+SafeRingBuffer<Point, 100> full_table_points;
+SafeValue<int> balls_n;
+SafeValue<bool> is_hitting(false);
+SafeValue<char> cmd('H');
 JointValue jval, jvalH, inijval;
 
+SafeRingBuffer<Point, 15> latest_ball_positions;
+SafeValue<Point> ball_position;
+SafeValue<double> hitting_angle;
+SafeValue<double> linear_predicted_y;
+SafeValue<double> quadratic_predicted_y;
+SafeValue<double> coming_angle;
+SafeValue<double> coming_velocity;
+
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
-bool is_hitting = false;
 
 JAKAZuRobot demo;
 MotorIK mkmotor;
@@ -222,7 +287,7 @@ class QuadraticPredictor
     double b_coeff; // Coefficient for x
     double c;       // Constant term
 public:
-    QuadraticPredictor(const std::vector<Point>& points)
+    QuadraticPredictor(const std::vector<Point> points)
     {
         int n = points.size();
 
@@ -308,22 +373,9 @@ double get_ball_coming_direction(std::vector<Point> balls)
 
 // Check if the ball is moving toward the robot
 // !!! Maybe about to modify
-bool is_ball_moving_toward_robot()
+bool is_ball_moving_toward_robot()  // modified
 {
-    std::vector<Point> track;
-    int count = 0, maxCount = 4;  // maxCount is the max number of points to check if the ball is moving toward the robot
-
-    for (; count < maxCount; count++)
-    {
-        // Get the current ball position
-        mtx.lock();
-        Point curr = ball_position;
-        mtx.unlock();
-
-        track.push_back(curr);
-
-        Sleep(1);
-    }
+    std::vector<Point> track = latest_ball_positions.snapshot();
 
     if (track[0].x <= 80 || track[0].x >= 2740) {
         return false;
@@ -343,81 +395,31 @@ bool is_ball_moving_toward_robot()
     return averageDirection < -5.0;
 }
 
-// Collect track data of the ball within a specified range
-std::vector<Point> record_trajectory_before(int maxCount, uint64_t& timeStart, uint64_t& timeEnd,
-    double xMin, double xMax,
-    double yMin = -750.0, double yMax = 750.0)
-{
-    std::vector<Point> track;
-    double lastT = -1.0; // record the last time to avoid duplicates
-    int count = 0;
-
-    while (count < maxCount)
-    {
-        mtx.lock();
-        Point curr = ball_position;
-        mtx.unlock();
-
-        // x \in [xMin, xMax], y \in [yMin, yMax]
-        if (curr.t != lastT &&
-            curr.x > xMin && curr.x < xMax &&
-            curr.y >= yMin && curr.y <= yMax)
-        {
-            track.push_back(curr);
-
-            if (count == 0)
-                timeStart = get_current_time_microseconds();
-            lastT = curr.t;
-            count++;
-            if (count == maxCount)
-                timeEnd = get_current_time_microseconds();
-
-            logger(Info, "Recorded point ", count, ": (", curr.x, " ", curr.y, ") when ", lastT);
-
-            if (config.if_record_trajectory) trajectory_outfile << curr.t << "," << curr.x << "," << curr.y << std::endl; // Write to CSV file
-        }
-        else if (curr.t == lastT) {
-
-            continue;
-        }
-        else if (track.size() > 2) {
-            logger(Info, "Point out of range. Stop collecting.");
-            break;
-        }
-
-        Sleep(5);
-    }
-
-    return track;
-}
-
 void record_trajectory_after() {
     queue<Point> track;  // Vector to store the trajectory points
 
     Point last_ball_pos = { 0, 0, 0 };
 
-    while (fabs(ball_position.x) < 0.1 && fabs(ball_position.y) < 0.1);
-
     while (true) {
         double ball_x, ball_y, time_stamp;
 
-        std::lock_guard<std::mutex> lock(mtx);  // 使用 std::lock_guard 自动管理锁
-        ball_x = ball_position.x;
-        ball_y = ball_position.y;
-        time_stamp = ball_position.t;
+        Point ball_position_copy = ball_position.get();
+        ball_x = ball_position_copy.x;
+        ball_y = ball_position_copy.y;
+        time_stamp = ball_position_copy.t;
 
         // Check if the ball is detected
-        if (balls_n == 0) {
+        if (balls_n.get() == 0) {
             Sleep(400);
 
-            if (balls_n == 0)
+            if (balls_n.get() == 0)
             {
                 logger(Info, "No ball detected. Recording stop.");
                 break;  // No ball detected, stop recording
             }
-            ball_x = ball_position.x;
-            ball_y = ball_position.y;
-            time_stamp = ball_position.t;
+            ball_x = ball_position_copy.x;
+            ball_y = ball_position_copy.y;
+            time_stamp = ball_position_copy.t;
         }
 
         // Check if the ball is within the table boundaries
@@ -570,13 +572,130 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
 }
 
 
+void batch_prediction()
+{
+    while (!is_hitting.get())
+    {
+        std::vector<Point> track = latest_ball_positions.snapshot();
+        double x = 200;
+        QuadraticPredictor qp(track);
+        quadratic_predicted_y.set(qp.predict(x));
+        LinearPredictor lp(track);
+        linear_predicted_y.set(lp.predict(x));
+    }
+
+    logger(Error, "yeah4");
+}
+
+void half_quadratic_prediction_calculation()
+{
+    double x = 200;
+    while (!is_hitting.get())
+    {
+        Sleep(20);
+        while (half_table_points.snapshot().size() <= 5) {}
+        QuadraticPredictor qp(half_table_points.snapshot());
+        quadratic_predicted_y.set(qp.predict(x));
+    }
+}
+
+void half_quadratic_prediction()
+{
+    half_table_points.clear();
+
+    std::thread half_quadratic_prediction(half_quadratic_prediction_calculation);
+    half_quadratic_prediction.detach();
+
+    Point ball_position_copy;
+
+    while (!is_hitting.get())
+    {
+        ball_position_copy = ball_position.get();
+        Sleep(20);
+        while (ball_position_copy.x >= 0.5 * TABLE_LENGTH) {}
+        half_table_points.push(ball_position_copy);
+    }
+}
+
+bool yeah;
+
+void full_quadratic_prediction_calculation()
+{
+    double x = 200;
+    while (yeah)
+    {
+        Sleep(20);
+        QuadraticPredictor qp(full_table_points.snapshot());
+        quadratic_predicted_y.set(qp.predict(x));
+    }
+
+    logger(Error, "yeah3");
+}
+
+void full_quadratic_prediction()
+{
+    if (full_table_points.empty()) full_table_points.clear();
+
+    yeah = true;
+
+    std::thread full_quadratic_prediction(full_quadratic_prediction_calculation);
+    full_quadratic_prediction.detach();
+
+    Point ball_position_copy;
+
+    while (!is_hitting.get())
+    {
+        ball_position_copy = ball_position.get();
+        Sleep(20);
+        full_table_points.push(ball_position_copy);
+    }
+
+    yeah = false;
+
+    logger(Error, "yeah2");
+}
+
+void record_trajectory_before()
+{
+    Point ball_position_copy;
+    if (!is_hitting.get())
+    {
+        ball_position_copy = ball_position.get();
+        trajectory_outfile << ball_position_copy.t << ',' << ball_position_copy.x << ',' << ball_position_copy.y << std::endl;
+    }
+}
+
+void coming_calculation()
+{
+    while (!is_hitting.get())
+    {
+        std::vector<Point> track = latest_ball_positions.snapshot();
+        coming_angle.set(get_ball_coming_direction(track));
+        double vx = (track.front().x - track.back().x) / (track.back().t - track.front().t);
+        double vy = (track.front().y - track.back().y) / (track.back().t - track.front().t);
+        coming_velocity.set(sqrt(vx * vx + vy * vy));
+        Sleep(20);
+    }
+
+    logger(Error, "yeah5");
+}
+
+void calculate_paddle_hitting()
+{
+    while (!is_hitting.get())
+    {
+        double y_quadratic_predicted = quadratic_predicted_y.get();
+        double y_linear_predicted = linear_predicted_y.get();
+        double y_predicted = y_linear_predicted * config.linear_weight_quadratic + y_quadratic_predicted * (1 - config.linear_weight_quadratic);
+        int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice;
+        hitting_angle.set(calculate_hitting_angle(200, y_predicted, goals[target_index].first, goals[target_index].second, coming_angle.get(), coming_velocity.get()));
+    }
+
+    logger(Error, "yeah6");
+}
+
 void trajectory_prediction()
 {
-    errno_t ret;
-    uint64_t time_start, time_end;
-    std::vector<Point> second_half_points;
-    std::vector<Point> full_table_points;
-
     if (config.if_record_trajectory) {
         // 打开记录轨迹文件
         trajectory_outfile.open(string(config.repo_path) + "\\national\\dynamic\\data_trajectory.csv", std::ios::trunc);
@@ -584,128 +703,78 @@ void trajectory_prediction()
             logger(Error, "Failed to open trajectory CSV file.");
         }
         trajectory_outfile << "t,x,y" << std::endl; // Write header
+
+        std::thread record_trajectory_before_thread(record_trajectory_before);
+        record_trajectory_before_thread.detach();
     }
 
-    if (config.if_record_prediction) {
-        prediction_outfile.open(string(config.repo_path) + "\\national\\dynamic\\data_prediction.csv", std::ios::app);
-        if (!prediction_outfile.is_open()) {
-            logger(Error, "Failed to open prediction comparison CSV file.");
-        }
-        else {
-            prediction_outfile << "stage,linear,batch_quadratic,full_table_quadratic,half_table_quadratic" << std::endl;
-        }
+    enum QuadraticMode { BATCH = 0, FULL = 1, HALF = 2 };
+    QuadraticMode mode;
+
+    std::thread batch_prediction_thread(batch_prediction);
+    std::thread half_prediction_thread(half_quadratic_prediction);
+    std::thread full_prediction_thread(full_quadratic_prediction);
+
+    switch (config.quadratic_prediction_mode) {
+    case 0: // batch quadratic prediction
+        batch_prediction_thread.detach();
+        mode = BATCH;
+        break;
+
+    case 1: // full-table quadratic prediction
+        half_prediction_thread.detach();
+        mode = FULL;
+        break;
+
+    case 2: // half-table quadratic prediction
+    default:
+        full_prediction_thread.detach();
+        mode = HALF;
+        break;
     }
 
+    std::thread velocity_thread(coming_calculation);
+    velocity_thread.detach();
 
-    double x = 200;
-    int stage = 0;
-    while (!is_hitting)
+    Sleep(20);
+
+    std::thread hitting_thread(calculate_paddle_hitting);
+    hitting_thread.detach();
+
+    while (!is_hitting.get())
     {
-        stage++;
-        std::vector<Point> track = record_trajectory_before(10, time_start, time_end, config.hitting_threshold, 2740);
+        std::vector<Point> track = latest_ball_positions.snapshot();
 
-
-        for (const auto& point : track) {
-            if (point.x < HALF_TABLE_LENGTH) {
-                second_half_points.push_back(point);
-            }
-            full_table_points.push_back(point);
-        }
-
-        double coming_angle = get_ball_coming_direction(track);
-        double vx = (track.front().x - track.back().x) / (track.back().t - track.front().t);
-        double vy = (track.front().y - track.back().y) / (track.back().t - track.front().t);
-        double coming_velocity = sqrt(vx * vx + vy * vy);
-
-
-        double y_quadratic_predicted;
-        double batch_prediction;
-        double full_table_prediction;
-        double half_table_prediction;
-        enum QuadraticMode { BATCH = 0, FULL = 1, HALF = 2 };
-        QuadraticMode mode;
-
-
-        // test
-        QuadraticPredictor qp_batch(track);
-        batch_prediction = qp_batch.predict(x);
-
-        QuadraticPredictor qp_full(full_table_points);
-        full_table_prediction = qp_full.predict(x);
-
-        bool half_table_valid = false;
-        if (second_half_points.size() >= 5) {
-            QuadraticPredictor qp_half(second_half_points);
-            half_table_prediction = qp_half.predict(x);
-            half_table_valid = true;
-        }
-        else {
-            half_table_prediction = full_table_prediction;
-        }
-
-
-        switch (config.quadratic_prediction_mode) {
-        case 0: // batch quadratic prediction
-            y_quadratic_predicted = batch_prediction;
-            mode = BATCH;
-            break;
-
-        case 1: // full-table quadratic prediction
-            y_quadratic_predicted = full_table_prediction;
-            mode = FULL;
-            break;
-
-        case 2: // half-table quadratic prediction
-        default:
-            y_quadratic_predicted = half_table_prediction;
-            mode = HALF;
-            break;
-        }
-
-
-        LinearPredictor lp(track);
-        double y_linear_predicted = lp.predict(x);
+        double y_quadratic_predicted = quadratic_predicted_y.get();
+        double y_linear_predicted = linear_predicted_y.get();
         double y_predicted = y_linear_predicted * config.linear_weight_quadratic + y_quadratic_predicted * (1 - config.linear_weight_quadratic);
-
-        if (prediction_outfile.is_open()) {
-            prediction_outfile << stage << ","
-                << y_linear_predicted << ","
-                << batch_prediction << ","
-                << full_table_prediction << ","
-                << (half_table_valid ? half_table_prediction : "") << std::endl;
-        }
-
-        logger(Info, "mode [", mode, "] When x = 200mm, y = ", y_predicted, "mm.");
-        logger(Info, "batch = ", batch_prediction, " mm, full = ", full_table_prediction, " mm, half = ", half_table_prediction, " mm.");
 
         go_to_left = (y_predicted > 0);
 
         JointValue temp;
 
         logger(Move, "Motor preparing.");
-        if (is_hitting) break;
+        if (is_hitting.get()) break;
         mkmotor.goToPos2(go_to_left ? -160 : -20, 1, 400, false);
 
         int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice;
+
         logger(Info, "Choose goal ", target_index, ".");
 
-        hitting_angle = calculate_hitting_angle(x, y_predicted, goals[target_index].first, goals[target_index].second, coming_angle, coming_velocity);
 
         CartesianPose pos;
-        pos.tran.x = x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad) + config.jaka_offset_x;
-        pos.tran.y = y_predicted - config.paddle_ball_center_distance * sin(hitting_angle * Deg2Rad) + config.jaka_offset_y;
+        pos.tran.x = 200 - config.paddle_ball_center_distance * cos(hitting_angle.get() * Deg2Rad) + config.jaka_offset_x;
+        pos.tran.y = y_predicted - config.paddle_ball_center_distance * sin(hitting_angle.get() * Deg2Rad) + config.jaka_offset_y;
         pos.tran.z = go_to_left ? config.paddle_z_left : config.paddle_z_right;
-        pos.rpy.rx = go_to_left ? (-90 + hitting_angle) * Deg2Rad : (90 - hitting_angle) * Deg2Rad;
+        pos.rpy.rx = go_to_left ? (-90 + hitting_angle.get()) * Deg2Rad : (90 - hitting_angle.get()) * Deg2Rad;
         pos.rpy.ry = go_to_left ? -90 * Deg2Rad : 90 * Deg2Rad;
         pos.rpy.rz = 0;
-        if (is_hitting) break;
         try
         {
             demo.kine_inverse(&inijval, &pos, &jvalH);
 
-            logger(Move, "Jaka mini first adjustment.");
-            ret = demo.joint_move(&jvalH, MoveMode::ABS, false, config.jaka_speed, 400 * Deg2Rad, 2, NULL);
-            Sleep(200);
+            demo.joint_move(&jvalH, MoveMode::ABS, false, config.jaka_speed, 400 * Deg2Rad, 2, NULL);
+            Sleep(50);
         }
         catch (std::runtime_error)
         {
@@ -768,28 +837,21 @@ void trajectory_prediction()
 
         demo.servo_move_enable(FALSE);
     }
-
-    if (prediction_outfile.is_open()) {
-        prediction_outfile.close();
-    }
-    if (trajectory_outfile.is_open()) {
-        trajectory_outfile.close();
-    }
 }
 
 void calculate_hit(int round)
 {
     logger(Info, "Round ", round, " hitting.");
-    is_hitting = false;
+    is_hitting.set(false);
 
     std::thread t(trajectory_prediction);
     t.detach(); // Start trajectory prediction in a separate thread
 
     // hitting!
-    while (ball_position.x >= config.hitting_threshold && cmd == 'k') {} // Wait for the ball to reach hitting position
-    is_hitting = true;
+    while (ball_position.get().x >= config.hitting_threshold && cmd.get() == 'k') {} // Wait for the ball to reach hitting position
+    is_hitting.set(true);
     mkmotor.goToPos2(go_to_left ? -270 : 90, 1, config.speed, false);
-    logger(Info, "Motor will hit when ball.x is ", ball_position.x);
+    logger(Info, "Motor will hit when ball.x is ", ball_position.get().x);
 
     logger(Move, "Motor hitting.");
 
@@ -888,11 +950,12 @@ int main()
     mkmotor.goToPos2(0, 1, 200, false);
 
     get_correction_data();
+    int hitting_round = 1;
 
-    if (!config.if_referee) cmd = 'k';
+    if (!config.if_referee) cmd.set('k');
 
-    while (cmd != 'e') {
-        if (cmd != 'k') continue;
+    while (cmd.get() != 'e') {
+        if (cmd.get() != 'k') continue;
 
         while (!is_ball_moving_toward_robot()) {}
         calculate_hit(hitting_round);
@@ -903,47 +966,36 @@ int main()
         mkmotor.goToPos2(0, 1, 200, false);
         demo.joint_move(&inijval, MoveMode::ABS, true, 5);
 
-        if (config.if_referee) while (cmd == 'k') {}
+        if (config.if_referee) while (cmd.get() == 'k') {}
     }
 }
 
 
+void get_vision_vector()
+{
+    while (true)
+    {
+        if (ball_position.get().t != latest_ball_positions.snapshot().back().t)
+        {
+            latest_ball_positions.push(ball_position.get());
+        }
+    }
+}
+
 // Constantly get vision data in a separate thread
 void get_vision()
 {
+    for (int i = 0; i < 15; i++)
+    {
+        latest_ball_positions.push(Point{ 1.0 + i,100.0 + i,0 });
+    }
+
     RoboCupSSLClient client;
     client.open(true);
     SSL_WrapperPacket packet;
-    std::vector<Point> ballP;
 
-    double a_x, b_x, c_x, a_y, b_y, c_y;
-
-    if (config.if_vision_correction)
-    {
-        ifstream correction_file(string(config.repo_path) + "\\national\\public\\visual_correction.csv");
-        string line;
-        getline(correction_file, line); // Skip the header line
-        getline(correction_file, line); // Read the first line
-
-        stringstream ss(line);
-
-        ss >> a_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> b_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> c_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> a_y;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> b_y;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> c_y;
-    }
-    else
-    {
-        a_x = 1.0; b_x = 0.0; c_x = 0.0;
-        a_y = 0.0; b_y = 1.0; c_y = 0.0;
-    }
+    std::thread vector_t(get_vision_vector);
+    vector_t.detach();
 
     while (true)
     {
@@ -953,21 +1005,15 @@ void get_vision()
             {
                 // Check if the packet contains detection data
                 SSL_DetectionFrame detection = packet.detection();
-                balls_n = detection.balls_size(); // Get the number of detected balls
-                //std::cout << ball.x();
-                // Update the ball position
-                for (int i = 0; i < balls_n; i++)
+                balls_n.set(detection.balls_size());
+                if (balls_n.get())
                 {
-                    SSL_DetectionBall ball = detection.balls(i);
+                    SSL_DetectionBall ball = detection.balls(0);
                     Point pp;
-                    pp.x = a_x * ball.x() + b_x * ball.y() + c_x; // Apply correction
-                    pp.y = a_y * ball.x() + b_y * ball.y() + c_y; // Apply correction
+                    pp.x = ball.x();
+                    pp.y = ball.y();
                     pp.t = detection.t_capture();
-                    mtx.lock();
-                    ball_position = pp;
-                    mtx.unlock();
-
-                    ballP.push_back(pp);
+                    ball_position.set(pp);
                 }
             }
         }
@@ -980,27 +1026,27 @@ char translate_referee(Referee_Command command)
     switch (command)
     {
     case 0:
-        cmd = 'H';
-        break; // Halt
+        cmd.set('H');
+        break;
     case 1:
-        cmd = 'S';
-        break; // Stop
+        cmd.set('S');
+        break;
     case 2:
-        cmd = ' ';
-        break; // Normal start (Ready)
+        cmd.set(' ');
+        break;
     case 8:
-        cmd = 'k';
-        break; // Kickoff Yellow
+        cmd.set('k');
+        break;
     case 9:
-        cmd = 'K';
-        break; // Kickoff Blue
+        cmd.set('K');
+        break;
     default:
         std::cout << "refereebox is fail !!!!! command : " << command << std::endl;
-        cmd = 'H';
+        cmd.set('H');
         break;
     }
 
-    return cmd;
+    return cmd.get();
 }
 
 void get_referee()
