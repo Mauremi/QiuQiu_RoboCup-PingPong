@@ -101,7 +101,6 @@ struct Config {
 
     // motor speed
     const int speed = 740; // Maximum speed for the motor
-    const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
 
     // paddle position
@@ -144,6 +143,7 @@ JointValue jval, jvalH, inijval;
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
 bool is_hitting = false;
+double hitting_threshold; // Threshold system time to decide when to hit the ball
 
 JAKAZuRobot demo;
 MotorIK mkmotor;
@@ -570,6 +570,48 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
 }
 
 
+double calculate_hitting_threshold(vector<Point> track)
+{
+    if (track.size() < 5) {
+        logger(Error, "Insufficient points to calculate velocity. Got only ", track.size(), " points.");
+        return 0.0;
+    }
+
+    std::vector<double> times;
+    std::vector<double> x_positions;
+
+    for (int i = track.size() - 5; i < track.size(); i++) {
+        times.push_back(track[i].t);
+        x_positions.push_back(track[i].x);
+    }
+
+    double t_mean = 0.0, x_mean = 0.0;
+    for (int i = 0; i < times.size(); i++) {
+        t_mean += times[i];
+        x_mean += x_positions[i];
+    }
+    t_mean /= times.size();
+    x_mean /= times.size();
+
+    double numerator = 0.0;
+    double denominator = 0.0;
+
+    for (int i = 0; i < times.size(); i++) {
+        numerator += (times[i] - t_mean) * (x_positions[i] - x_mean);
+        denominator += (times[i] - t_mean) * (times[i] - t_mean);
+    }
+
+    double velocity_x = numerator / denominator;
+
+    logger(Info, "Calculated x-direction velocity: ", velocity_x);
+
+    double t = (track.back().x - 200) / velocity_x + 20 / config.speed;
+    double last_point_t = track.back().t;
+
+    return last_point_t + t;
+}
+
+
 void trajectory_prediction()
 {
     errno_t ret;
@@ -602,7 +644,8 @@ void trajectory_prediction()
     while (!is_hitting)
     {
         stage++;
-        std::vector<Point> track = record_trajectory_before(10, time_start, time_end, config.hitting_threshold, 2740);
+        std::vector<Point> track = record_trajectory_before(10, time_start, time_end, 250, 2740);
+        hitting_threshold = calculate_hitting_threshold(track);
 
 
         for (const auto& point : track) {
@@ -672,7 +715,7 @@ void trajectory_prediction()
                 << y_linear_predicted << ","
                 << batch_prediction << ","
                 << full_table_prediction << ","
-                << (half_table_valid ? half_table_prediction : "") << std::endl;
+                << (half_table_valid ? half_table_prediction : 0) << std::endl;
         }
 
         logger(Info, "mode [", mode, "] When x = 200mm, y = ", y_predicted, "mm.");
@@ -786,7 +829,8 @@ void calculate_hit(int round)
     t.detach(); // Start trajectory prediction in a separate thread
 
     // hitting!
-    while (ball_position.x >= config.hitting_threshold && cmd == 'k') {} // Wait for the ball to reach hitting position
+    double t_sys = chrono::duration<double>(chrono::system_clock::now().time_since_epoch()).count();
+    while (t_sys >= hitting_threshold && cmd == 'k') {} // Wait for the ball to reach hitting position
     is_hitting = true;
     mkmotor.goToPos2(go_to_left ? -270 : 90, 1, config.speed, false);
     logger(Info, "Motor will hit when ball.x is ", ball_position.x);
