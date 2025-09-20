@@ -86,13 +86,16 @@ void logger(Logger l, const Args&... args) {
 }
 
 
-std::map<int, std::pair<double, double>> targets = {
-    {1, {TABLE_LENGTH + 280,  560}},
-    {2, {TABLE_LENGTH + 280,  0}},
-    {3, {TABLE_LENGTH + 280, -560}},
-    {4, {TABLE_LENGTH + 540,  250}},
-    {5, {TABLE_LENGTH + 540, -250}},
-    {6, {TABLE_LENGTH + 780,  0}}
+std::map<int, std::pair<double, double>> goals = {
+    {1, {TABLE_LENGTH - GOAL_THICKNESS,  725}},
+    {2, {TABLE_LENGTH - GOAL_THICKNESS,  540}},
+    {3, {TABLE_LENGTH - GOAL_THICKNESS,  360}},
+    {4, {TABLE_LENGTH - GOAL_THICKNESS,  180}},
+    {5, {TABLE_LENGTH - GOAL_THICKNESS,    0}},
+    {6, {TABLE_LENGTH - GOAL_THICKNESS, -180}},
+    {7, {TABLE_LENGTH - GOAL_THICKNESS, -360}},
+    {8, {TABLE_LENGTH - GOAL_THICKNESS, -540}},
+    {9, {TABLE_LENGTH - GOAL_THICKNESS, -725}},
 };
 // No, x, y, score
 
@@ -138,7 +141,7 @@ struct Config {
 double coming_angle;
 double coming_velocity;
 double leaving_angle;
-double leaving_velocity;//ÎªÁË¼ÆËãËÙ¶È
+double leaving_velocity;//Îªï¿½Ë¼ï¿½ï¿½ï¿½ï¿½Ù¶ï¿½
 
 struct Point
 {
@@ -428,7 +431,7 @@ void record_trajectory_after() {
     while (true) {
         double ball_x, ball_y, time_stamp;
 
-        std::lock_guard<std::mutex> lock(mtx);  // Ê¹ÓÃ std::lock_guard ×Ô¶¯¹ÜÀíËø
+        std::lock_guard<std::mutex> lock(mtx);  // Ê¹ï¿½ï¿½ std::lock_guard ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         ball_x = ball_position.x;
         ball_y = ball_position.y;
         time_stamp = ball_position.t;
@@ -493,7 +496,7 @@ double computeLandingDistance(double velocity) {
     double tau = BALL_MASS / k;  // s
 
     double omega = velocity / BALL_RADIUS;  // rad/s
-    int s = -1;  // Ç°¹ö -> Magnus ÏòÏÂ
+    int s = -1;  // Ç°ï¿½ï¿½ -> Magnus ï¿½ï¿½ï¿½ï¿½
 
     auto f = [&](double y) {
         double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
@@ -508,7 +511,7 @@ double computeLandingDistance(double velocity) {
         return term1 - term2;
         };
 
-    // Newton ½â y
+    // Newton ï¿½ï¿½ y
     double y = 1.0;
     for (int i = 0; i < 50; i++) {
         double fy = f(y);
@@ -521,7 +524,7 @@ double computeLandingDistance(double velocity) {
 
     double R = velocity * tau * (1 - exp(-y));
     return R;
-}//¸¨Öú·½·¨¶þ¼ÆËãËÙ¶È¡£
+}//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ù¶È¡ï¿½
 
 double computeVelocityFromDistance(double distance) {
     double low = 10.0;       // mm/s
@@ -538,7 +541,7 @@ double computeVelocityFromDistance(double distance) {
         }
     }
     return 0.5 * (low + high);
-}//¸¨Öú·½·¨¶þ¼ÆËãËÙ¶È¡£
+}//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ù¶È¡ï¿½
 
 double calculate_leaving_velocity(int velocity_calculating_method, double ball_x, double ball_y, double target_x, double target_y) {
     if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
@@ -560,7 +563,7 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
         logger(Info, "Motor speed: ", motor_speed * config.projectile_coefficient);
 
         return motor_speed * config.projectile_coefficient;
-    }//Æ½Å×¼ÆËã¾àÀë
+    }//Æ½ï¿½×¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     if (velocity_calculating_method == 2) {
         double distance = flight_distance;
         double leaving_velocity = computeVelocityFromDistance(distance);
@@ -569,7 +572,7 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
         logger(Info, "Motor speed : ", motor_speed);
 
         return motor_speed;
-    }//¿ÕÆø¶¯Á¦Ñ§¼ÆËã¾àÀë
+    }//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ§ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 }
 
 double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle) {
@@ -581,7 +584,7 @@ double calculate_hitting_angle(double coming_angle, double coming_velocity, doub
 
     double phi = std::atan2(numerator, denominator);
     return phi;
-}//¼ÆËã»÷Çò½Ç¶È
+}//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç¶ï¿½
 
 double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e) {
 
@@ -592,8 +595,8 @@ double calculate_hitting_velocity(double coming_angle, double coming_velocity, d
 
     const double denominator = 1.0 + e;
 
-    return numerator / denominator; //·µ»Øvp
-}//¼ÆËã»÷ÇòËÙ¶È
+    return numerator / denominator; //ï¿½ï¿½ï¿½ï¿½vp
+}//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ù¶ï¿½
 
 
 
@@ -641,9 +644,9 @@ void trajectory_prediction()
         int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice; // !!! ??
         logger(Info, "Choose goal ", target_index, ".");
 
-        leaving_angle = calculate_leaving_angle(x, y_predicted, targets[target_index].first, targets[target_index].second);
+        leaving_angle = calculate_leaving_angle(x, y_predicted, goals[target_index].first, goals[target_index].second);
         hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
-        leaving_velocity = calculate_leaving_velocity(config.if_difficult_velocity, x, y_predicted, targets[target_index].first, targets[target_index].second);
+        leaving_velocity = calculate_leaving_velocity(2, x, y_predicted, goals[target_index].first, goals[target_index].second);
 
         CartesianPose pos;
         pos.tran.x = x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad) + config.jaka_offset_x;
@@ -956,7 +959,7 @@ void get_referee()
 {
     int round = 0;
     RoboCupSSLClient client(10003, "224.5.23.1", "");
-    client.open(true); // ´ò¿ª¿Í»§¶ËÁ¬½Ó
+    client.open(true); // ï¿½ò¿ª¿Í»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     Referee packet;
     byte datagram[20000];
     while (true)
@@ -964,22 +967,22 @@ void get_referee()
         if (client.receive(packet))
         {
             if (packet.has_command())
-            { // ¼ì²éÊÇ·ñÓÐÃüÁî
+            { // ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                 Referee_Command next_command = packet.command();
-                char cmd = translate_referee(next_command); // ½«ÃüÁî×ª»»Îª¿ØÖÆ×Ö·û
+                char cmd = translate_referee(next_command); // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½
                 // cout << cmd;
                 if (cmd == 'k' && packet.has_yellow())
                 {
-                    // std::cout << "comand is " << cmd; // Êä³öÃüÁî
+                    // std::cout << "comand is " << cmd; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                     Referee_TeamInfo team = packet.yellow();
-                    // std::cout << "current hit num is " << team.timeouts(); //Êä³öµ±Ç°µÄ»÷´òÊý
+                    // std::cout << "current hit num is " << team.timeouts(); //ï¿½ï¿½ï¿½ï¿½ï¿½Ç°ï¿½Ä»ï¿½ï¿½ï¿½ï¿½ï¿½
                     round = team.timeouts();
                 }
                 if (cmd == 'K' && packet.has_blue())
                 {
-                    // std::cout << "comand is " << cmd; // Êä³öÃüÁî
+                    // std::cout << "comand is " << cmd; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                     Referee_TeamInfo team = packet.blue();
-                    // std::cout << "current hit num is " << team.timeouts();//Êä³öµ±Ç°µÄ»÷´òÊý
+                    // std::cout << "current hit num is " << team.timeouts();//ï¿½ï¿½ï¿½ï¿½ï¿½Ç°ï¿½Ä»ï¿½ï¿½ï¿½ï¿½ï¿½
                 }
             }
             if (packet.has_yellow())
