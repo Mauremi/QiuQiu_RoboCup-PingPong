@@ -136,10 +136,6 @@ struct Config {
     const double velocity_y_parameter = 5 / 7.0; // Coefficient for velocity_y in the equation
 } config;
 
-double coming_angle;
-double coming_velocity;
-double leaving_angle;
-double leaving_velocity;
 
 struct Point
 {
@@ -333,7 +329,10 @@ double get_ball_coming_direction(std::vector<Point> balls)
     double angle_degrees = angle_radians * Rad2Deg;
     return angle_degrees;
 }
-
+double coming_angle;
+double coming_velocity;
+double leaving_angle;
+double leaving_velocity;
 // Check if the ball is moving toward the robot
 // !!! Maybe about to modify
 bool is_ball_moving_toward_robot()
