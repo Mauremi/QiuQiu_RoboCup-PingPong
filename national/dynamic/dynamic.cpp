@@ -39,7 +39,8 @@ using std::chrono::milliseconds;
 
 #define TABLE_LENGTH 2740
 #define TABLE_WIDTH 1525
-#define TABLE_HEIGHT 760
+#define GOAL_WIDTH 80
+#define GOAL_THICKNESS 20
 
 #define GRAVITY 9800.0
 #define BALL_MASS 2.7
@@ -48,9 +49,9 @@ using std::chrono::milliseconds;
 #define AIR_DENSITY 1.2e-9
 #define AIR_VISCOSITY 1.8e-4
 #define DRAG_COEFF 0.47
-#define BALL_AREA (pi222 * BALL_RADIUS * BALL_RADIUS)
-
-/*#define BUCKET_HEIGHT 100*/
+#define BALL_AREA (3.1415926 * BALL_RADIUS * BALL_RADIUS)
+#define TABLE_HEIGHT 760
+#define BUCKET_HEIGHT 100
 
 
 enum Logger { Info, Error, Move, Hint, Input };
@@ -128,17 +129,13 @@ struct Config {
     // IFs
     const bool if_record_trajectory = true; // If record trajectory
     const bool if_vision_correction = false;
-    const int if_difficult_velocity = 2;
+    const int if_difficult_velocity = 1;
 
     // Equation
     const double parameter_e_left = 0.74, parameter_e_right = 0.76;
     const double velocity_y_parameter = 5 / 7.0; // Coefficient for velocity_y in the equation
 } config;
 
-double coming_angle;
-double coming_velocity;
-double leaving_angle;
-double leaving_velocity;//为了计算速度
 
 struct Point
 {
@@ -332,7 +329,10 @@ double get_ball_coming_direction(std::vector<Point> balls)
     double angle_degrees = angle_radians * Rad2Deg;
     return angle_degrees;
 }
-
+double coming_angle;
+double coming_velocity;
+double leaving_angle;
+double leaving_velocity;
 // Check if the ball is moving toward the robot
 // !!! Maybe about to modify
 bool is_ball_moving_toward_robot()
@@ -498,7 +498,7 @@ double computeLandingDistance(double velocity) {
     auto f = [&](double y) {
         double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
         double term2 = s * omega * velocity * tau * tau * (1 - (y + 1) * exp(-y));
-        double H = TABLE_HEIGHT;
+        double H = TABLE_HEIGHT - BUCKET_HEIGHT;
         return term1 - term2 - H;
         };
 
@@ -551,7 +551,7 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
     double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
 
     double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
-    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right;
+    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
     if (velocity_calculating_method == 1) {
         double flight_time = sqrt(off_table_height);
         double speed = flight_distance / flight_time;
