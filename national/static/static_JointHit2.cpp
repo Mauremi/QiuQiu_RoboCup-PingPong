@@ -1,4 +1,4 @@
-#pragma comment(lib, "winmm.lib")
+ï»¿#pragma comment(lib, "winmm.lib")
 #include <stdio.h>
 #include "net/robocup_ssl_client.h"
 #include "visionProto/messages_robocup_ssl_detection.pb.h"
@@ -38,8 +38,19 @@ using std::chrono::milliseconds;
 
 #define TABLE_LENGTH 2740
 #define TABLE_WIDTH 1525
-#define SANDBOX_HEIGHT 100
+#define TABLE_HEIGHT 760
+#define BUCKET_HEIGHT 0
+#define SANDBOX_HEIGHT 40
 #define GRAVITY 9796.7 // Gravity constant in mm/s^2
+
+#define BALL_MASS 2.7
+#define BALL_RADIUS 20.0
+
+#define AIR_DENSITY 1.2e-9
+#define AIR_VISCOSITY 1.8e-4
+#define DRAG_COEFF 0.47
+#define BALL_AREA (3.1415926 * BALL_RADIUS * BALL_RADIUS)
+
 
 enum Logger { Info, Error, Move, Hint, Input };
 
@@ -92,13 +103,15 @@ struct Config {
     bool if_referee;
 
     // speed
-    const double velocity_factor = 40; // velocity shift factor 35.5 for second targets
     const int jaka_speed = 620;
     const int jaka_acceleration = 4000;
 
     // Motor speed 
     const double table_height_left = 760, table_height_right = 760;  // table height (left and right). If table is not flat, set the height of the left and right side of the table.
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
+    const double projectile_coefficient = 0.6;
+    const double velocity_factor_old = 34.5;
+    const double velocity_factor_new = 0.6;
 
     // Paddle location
     const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
@@ -109,6 +122,7 @@ struct Config {
     // Settings (IFs)
     const bool if_record_trajectory = true; // if record trajectory
     const bool if_vision_correction = false;
+    const int if_difficult_velocity = 1;
 
     // Adjacent learning
     const bool if_adjacent_learning = true; // if use adjacent learning
@@ -300,7 +314,7 @@ void record_trajectory() {
     while (balls_n == 0);
 
     while (true) {
-        std::lock_guard<std::mutex> lock(mtx);  // Ê¹ÓÃ std::lock_guard ×Ô¶¯¹ÜÀíËø
+        std::lock_guard<std::mutex> lock(mtx);  // ä½¿ç”¨ std::lock_guard è‡ªåŠ¨ç®¡ç†é”
         Point current_ball = ball_position;
 
         // Check if the ball is detected
@@ -393,17 +407,18 @@ void record_trajectory() {
 }
 
 // Define the speed based on the ball position
+
 double computeLandingDistance(double velocity) {
     double k = 0.5 * AIR_DENSITY * DRAG_COEFF * BALL_AREA;  // g/mm
     double tau = BALL_MASS / k;  // s
 
     double omega = velocity / BALL_RADIUS;  // rad/s
-    int s = -1;  // Ç°¹ö -> Magnus ÏòÏÂ
+    int s = -1;  // å‰æ»š -> Magnus å‘ä¸‹
 
     auto f = [&](double y) {
         double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
         double term2 = s * omega * velocity * tau * tau * (1 - (y + 1) * exp(-y));
-        double H = TABLE_HEIGHT;
+        double H = TABLE_HEIGHT - BUCKET_HEIGHT;
         return term1 - term2 - H;
         };
 
@@ -413,7 +428,7 @@ double computeLandingDistance(double velocity) {
         return term1 - term2;
         };
 
-    // Newton ½â y
+    // Newton è§£ y
     double y = 1.0;
     for (int i = 0; i < 50; i++) {
         double fy = f(y);
@@ -426,7 +441,7 @@ double computeLandingDistance(double velocity) {
 
     double R = velocity * tau * (1 - exp(-y));
     return R;
-}//¸¨Öú·½·¨¶ş¼ÆËãËÙ¶È¡£
+}//è¾…åŠ©æ–¹æ³•äºŒè®¡ç®—é€Ÿåº¦ã€‚
 
 double computeVelocityFromDistance(double distance) {
     double low = 10.0;       // mm/s
@@ -443,7 +458,7 @@ double computeVelocityFromDistance(double distance) {
         }
     }
     return 0.5 * (low + high);
-}//¸¨Öú·½·¨¶ş¼ÆËãËÙ¶È¡£
+}//è¾…åŠ©æ–¹æ³•äºŒè®¡ç®—é€Ÿåº¦ã€‚
 
 double define_fake_motor_speed(int velocity_calculating_method, double ball_x, double ball_y, double target_x, double target_y) {
     if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
@@ -456,34 +471,33 @@ double define_fake_motor_speed(int velocity_calculating_method, double ball_x, d
     double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
 
     double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
-    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right;
+    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
     if (velocity_calculating_method == 1) {
         double flight_time = sqrt(off_table_height);
         double speed = flight_distance / flight_time;
-        double motor_speed = speed * config.velocity_factor;
+        double motor_speed = speed * config.velocity_factor_old;
 
         logger(Info, "Motor speed: ", motor_speed * config.projectile_coefficient);
 
         return motor_speed * config.projectile_coefficient;
-    }//Æ½Å×¼ÆËã¾àÀë
+    }//å¹³æŠ›è®¡ç®—è·ç¦»
     if (velocity_calculating_method == 2) {
         double distance = flight_distance;
         double leaving_velocity = computeVelocityFromDistance(distance);
-        double motor_speed = leaving_velocity * config.velocity_factor;
+        double motor_speed = leaving_velocity * config.velocity_factor_new;
 
         logger(Info, "Motor speed : ", motor_speed);
 
         return motor_speed;
-    }//¿ÕÆø¶¯Á¦Ñ§¼ÆËã¾àÀë
+    }//ç©ºæ°”åŠ¨åŠ›å­¦è®¡ç®—è·ç¦»
 }
-
 
 bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& adjust, double& motor_speed, double ball_x, double ball_y, double hitting_angle)
 {
     motor_speed -= (double)config.jaka_speed / ((ball_y > 0) ? config.paddle_z_left : config.paddle_z_right) / pi222 * 180;
 
     // To be completed: check inverse error.
-    //ÏÈ³¢ÊÔÑØ×ÅÒÆ¶¯·½ÏòÆ«ÒÆ£¬3cmºóÈÔÈ»error£¬ÔòÑØ×Å´¹Ö±ÒÆ¶¯·½ÏòÆ«ÒÆÖÁ¶à2cm
+    //å…ˆå°è¯•æ²¿ç€ç§»åŠ¨æ–¹å‘åç§»ï¼Œ3cmåä»ç„¶errorï¼Œåˆ™æ²¿ç€å‚ç›´ç§»åŠ¨æ–¹å‘åç§»è‡³å¤š2cm
 
     adjust.ball_distance = 0;
     adjust.prepare_distance = 0;
@@ -493,13 +507,13 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
 
 
 
-    if (ball_x < 100) //ÇòÔÚÏÂ±ßÔµ
+    if (ball_x < 100) //çƒåœ¨ä¸‹è¾¹ç¼˜
     {
         adjust.ball_distance_x_sign = 1;
         adjust.ball_distance_y_sign = 1;
         adjust.prepare_vertical_x_sign = ball_y > 0 ? -1 : 1;
         adjust.prepare_vertical_y_sign = ball_y > 0 ? 1 : -1;
-        //ÏÈÈ·¶¨ÖÕµãµÄÎ»ÖÃ
+        //å…ˆç¡®å®šç»ˆç‚¹çš„ä½ç½®
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
         {
@@ -532,7 +546,7 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         {
             logger(Error, "Can't find terminal position!"); return false;
         }
-        //È·¶¨×¼±¸¾àÀë
+        //ç¡®å®šå‡†å¤‡è·ç¦»
         for (; adjust.prepare_distance <= 30; adjust.prepare_distance += 5)
         {
             preparing_distance -= adjust.prepare_distance;
@@ -587,13 +601,13 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         }
         return false;
     }
-    if (ball_x >= 200) //ÇòÔÚÉÏ±ßÔµ
+    if (ball_x >= 200) //çƒåœ¨ä¸Šè¾¹ç¼˜
     {
         adjust.ball_distance_x_sign = -1;
         adjust.ball_distance_y_sign = -1;
         adjust.prepare_vertical_x_sign = ball_y > 0 ? 1 : -1;
         adjust.prepare_vertical_y_sign = ball_y > 0 ? -1 : 1;
-        //È·¶¨µ÷ÕûÖÕµã
+        //ç¡®å®šè°ƒæ•´ç»ˆç‚¹
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance = +1)
         {
@@ -626,7 +640,7 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         {
             logger(Error, "Can't find terminal position!"); return false;
         }
-        //È·¶¨×¼±¸¾àÀë
+        //ç¡®å®šå‡†å¤‡è·ç¦»
         for (; adjust.prepare_distance <= 20; adjust.prepare_distance += 5)
         {
 
@@ -680,7 +694,7 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         }
         return false;
     }
-    if (ball_y > 300) //ÇòÔÚ×ó±ßÔµ
+    if (ball_y > 300) //çƒåœ¨å·¦è¾¹ç¼˜
     {
         adjust.ball_distance_x_sign = 1;
         adjust.ball_distance_y_sign = -1;
@@ -770,13 +784,13 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         }
         return false;
     }
-    if (ball_y < -300) //ÇòÔÚÓÒ±ßÔµ
+    if (ball_y < -300) //çƒåœ¨å³è¾¹ç¼˜
     {
         adjust.ball_distance_x_sign = 1;
         adjust.ball_distance_y_sign = 1;
         adjust.prepare_vertical_x_sign = 1;
         adjust.prepare_vertical_y_sign = 1;
-        //È·¶¨ÖÕµãÎ»ÖÃ    
+        //ç¡®å®šç»ˆç‚¹ä½ç½®    
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
         {
@@ -887,12 +901,12 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
     pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
     if (ball_y > 0) {
-        pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+        pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
         pos_preparing.rpy.ry = -90 * Deg2Rad;
         pos_preparing.rpy.rz = 0;
     }
     else {
-        pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+        pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
         pos_preparing.rpy.ry = 90 * Deg2Rad;
         pos_preparing.rpy.rz = 0;
     }
@@ -912,12 +926,12 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     pos_hitting.tran.y = ball_y - (2 * hitting_distance - preparing_distance) * sin(hitting_angle_rad);
     pos_hitting.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
     if (ball_y > 0) {
-        pos_hitting.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+        pos_hitting.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
         pos_hitting.rpy.ry = -90 * Deg2Rad;
         pos_hitting.rpy.rz = 0;
     }
     else {
-        pos_hitting.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+        pos_hitting.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
         pos_hitting.rpy.ry = 90 * Deg2Rad;
         pos_hitting.rpy.rz = 0;
     }
@@ -932,18 +946,16 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     else
         jaka_reaching_time = sqrt(2.0 * (preparing_distance - hitting_distance) / config.jaka_acceleration); // Time to reach hitting position
 
-    double motor_reaching_time = 90 / motor_speed; // Time for motor to reach hitting position
+    double motor_reaching_time = 180 / motor_speed; // Time for motor to reach hitting position
 
     if (jaka_reaching_time > motor_reaching_time)
     {
-        logger(Info, "Jaka mini move first.");
         demo.linear_move(&pos_hitting, MoveMode::ABS, false, config.jaka_speed, config.jaka_acceleration, 5, nullptr);
         Sleep((int)((jaka_reaching_time - motor_reaching_time) * 1000));
         mkmotor.goToPos2((ball_y > 0) ? -270 : 90, 0, motor_speed, false); // !DIRECTION
     }
     else
     {
-        logger(Info, "Motor move first.");
         mkmotor.goToPos2((ball_y > 0) ? -270 : 90, 0, motor_speed, false); // !DIRECTION
         Sleep((int)((motor_reaching_time - jaka_reaching_time) * 1000));
         demo.linear_move(&pos_hitting, MoveMode::ABS, false, config.jaka_speed, config.jaka_acceleration, 5, nullptr);
@@ -1040,7 +1052,7 @@ int main()
 
     errno_t ret = ERR_SUCC;
     logger(Move, "Jaka mini initializing.");
-    ret = demo.joint_move(&jval, MoveMode::ABS, true, 1);
+    ret = demo.joint_move(&jval, MoveMode::ABS, true, 5);
 
     logger(Move, "Motor initializing.");
     double ini_dianji_degree = 0;
@@ -1101,7 +1113,7 @@ int main()
         Sleep(200);
 
         // Decide the speed based on the ball position
-        double speed = define_fake_motor_speed(ball_position.x, ball_position.y, modified_target.x, modified_target.y);  // A fake speed, containing jaka and motor
+        double speed = define_fake_motor_speed(config.if_difficult_velocity, ball_position.x, ball_position.y, modified_target.x, modified_target.y);  // A fake speed, containing jaka and motor
 
         joint_hit(config.paddle_ball_center_hitting_distance, config.paddle_ball_center_preparing_distance, ball_x, ball_y, hitting_angle, speed);
 
@@ -1222,7 +1234,7 @@ void get_referee()
 {
     int round = 0;
     RoboCupSSLClient client(10003, "224.5.23.1", "");
-    client.open(true); // ´ò¿ª¿Í»§¶ËÁ¬½Ó
+    client.open(true); // æ‰“å¼€å®¢æˆ·ç«¯è¿æ¥
     Referee packet;
     byte datagram[20000];
     while (true)
@@ -1230,22 +1242,22 @@ void get_referee()
         if (client.receive(packet))
         {
             if (packet.has_command())
-            { // ¼ì²éÊÇ·ñÓĞÃüÁî
+            { // æ£€æŸ¥æ˜¯å¦æœ‰å‘½ä»¤
                 Referee_Command next_command = packet.command();
-                char cmd = translate_referee(next_command); // ½«ÃüÁî×ª»»Îª¿ØÖÆ×Ö·û
+                char cmd = translate_referee(next_command); // å°†å‘½ä»¤è½¬æ¢ä¸ºæ§åˆ¶å­—ç¬¦
                 // cout << cmd;
                 if (cmd == 'k' && packet.has_yellow())
                 {
-                    // std::cout << "comand is " << cmd; // Êä³öÃüÁî
+                    // std::cout << "comand is " << cmd; // è¾“å‡ºå‘½ä»¤
                     Referee_TeamInfo team = packet.yellow();
-                    // std::cout << "current hit num is " << team.timeouts(); //Êä³öµ±Ç°µÄ»÷´òÊı
+                    // std::cout << "current hit num is " << team.timeouts(); //è¾“å‡ºå½“å‰çš„å‡»æ‰“æ•°
                     round = team.timeouts();
                 }
                 if (cmd == 'K' && packet.has_blue())
                 {
-                    // std::cout << "comand is " << cmd; // Êä³öÃüÁî
+                    // std::cout << "comand is " << cmd; // è¾“å‡ºå‘½ä»¤
                     Referee_TeamInfo team = packet.blue();
-                    // std::cout << "current hit num is " << team.timeouts();//Êä³öµ±Ç°µÄ»÷´òÊı
+                    // std::cout << "current hit num is " << team.timeouts();//è¾“å‡ºå½“å‰çš„å‡»æ‰“æ•°
                 }
             }
             if (packet.has_yellow())
