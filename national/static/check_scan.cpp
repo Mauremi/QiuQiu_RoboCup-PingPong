@@ -117,9 +117,8 @@ enum ScanResult { Success, Stuck, OutOfReach };
 
 // 扫描配置
 struct ScanConfig {
-    double y_start = -250, y_end = 250, y_step = 50;
+    double y_start = -500, y_end = 500, y_step = 50;
     double x_start = 0, x_end = 250, x_step = 50;
-    double ry = 0, rx = 180, rz = 0;
     double speed = 5;
 } scanConfig;
 
@@ -165,6 +164,16 @@ void clear_log_files() {
 }
 
 void scanWorkspace() {
+    double last_x, last_y, last_z;
+
+    JointValue jval;
+    jval.jVal[0] = 0 * Deg2Rad;
+    jval.jVal[1] = 0 * Deg2Rad;
+    jval.jVal[2] = 90 * Deg2Rad;
+    jval.jVal[3] = 0 * Deg2Rad;
+    jval.jVal[4] = 0 * Deg2Rad;
+    jval.jVal[5] = 0 * Deg2Rad;
+
     logger(Hint, "Starting workspace scan. Press 'y' if reached, 'n' if stuck.");
 
     std::ofstream log_file(string(config.repo_path) + "\\national\\static\\scan_log.csv");
@@ -190,12 +199,11 @@ void scanWorkspace() {
             CartesianPose pos;
             pos.tran.x = x;
             pos.tran.y = y;
-            pos.tran.z = config.paddle_z_left;
-            pos.rpy.rx = scanConfig.rx * Deg2Rad;
-            pos.rpy.ry = scanConfig.ry * Deg2Rad;
-            pos.rpy.rz = scanConfig.rz * Deg2Rad;
+            pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
+            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.rz = 0 * Deg2Rad;
 
-            JointValue jval;
             JointValue jvalHome;
 
             try {
@@ -210,7 +218,7 @@ void scanWorkspace() {
             }
 
             logger(Move, "Moving to scan point (", x, ", ", y, ")...");
-            demo.joint_move(&jvalHome, MoveMode::ABS, true, scanConfig.speed);
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
 
             char response;
             logger(Input, "Did robot reach the point? (y/n): ");
@@ -220,12 +228,12 @@ void scanWorkspace() {
             std::string status = (response == 'y') ? "Success" : "Stuck";
 
             if (response == 'n') {
-                logger(Input, "Enter actual robot position (x y z): ");
-                std::cin >> actual_x >> actual_y >> actual_z;
+                actual_x = last_x; actual_y = last_y; actual_z = last_z;
             }
             else {
                 // 成功则用目标值填充
-                actual_x = x; actual_y = y; actual_z = config.paddle_z_left;
+                actual_x = x; actual_y = y; actual_z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
+                last_x = x; last_y = y; last_z = actual_z;
             }
 
             log_file << col << ","

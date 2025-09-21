@@ -111,7 +111,7 @@ struct Config {
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
     const double projectile_coefficient = 0.6;
     const double velocity_factor_old = 34.5;
-    const double velocity_factor_new = 0.6;
+    const double velocity_factor_new = 2.5;
 
     // Paddle location
     const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
@@ -122,7 +122,7 @@ struct Config {
     // Settings (IFs)
     const bool if_record_trajectory = true; // if record trajectory
     const bool if_vision_correction = false;
-    const int if_difficult_velocity = 1;
+    const int if_difficult_velocity = 2;
 
     // Adjacent learning
     const bool if_adjacent_learning = true; // if use adjacent learning
@@ -408,40 +408,40 @@ void record_trajectory() {
 
 // Define the speed based on the ball position
 
+#define DT 1e-4   // s (可调)
+// ------------------------------------------------
+
+// 计算落点距离
 double computeLandingDistance(double velocity) {
+    // 初始条件
+    double x = 0.0;      // mm
+    double z = 0.0;      // mm（桌边为 0，向下为正）
+    double vx = velocity; // mm/s
+    double vz = 0.0;      // mm/s
+
+    // 常量系数
     double k = 0.5 * AIR_DENSITY * DRAG_COEFF * BALL_AREA;  // g/mm
-    double tau = BALL_MASS / k;  // s
 
-    double omega = velocity / BALL_RADIUS;  // rad/s
-    int s = -1;  // 前滚 -> Magnus 向下
+    double H = TABLE_HEIGHT - BUCKET_HEIGHT; // mm
 
-    auto f = [&](double y) {
-        double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
-        double term2 = s * omega * velocity * tau * tau * (1 - (y + 1) * exp(-y));
-        double H = TABLE_HEIGHT - BUCKET_HEIGHT;
-        return term1 - term2 - H;
-        };
+    // 积分迭代
+    while (z < H) {
+        // 速度大小
+        double v = std::sqrt(vx * vx + vz * vz);
 
-    auto df = [&](double y) {
-        double term1 = GRAVITY * tau * tau * (1 - exp(-y));
-        double term2 = s * omega * velocity * tau * tau * (-y * exp(-y));
-        return term1 - term2;
-        };
+        // 阻力加速度
+        double ax = -(k / BALL_MASS) * v * vx;
+        double az = GRAVITY - (k / BALL_MASS) * v * vz;
 
-    // Newton 解 y
-    double y = 1.0;
-    for (int i = 0; i < 50; i++) {
-        double fy = f(y);
-        double dfy = df(y);
-        if (fabs(dfy) < 1e-9) break;
-        double y_new = y - fy / dfy;
-        if (fabs(y_new - y) < 1e-9) { y = y_new; break; }
-        y = y_new;
+        // Euler 积分
+        vx += ax * DT;
+        vz += az * DT;
+        x += vx * DT;
+        z += vz * DT;
     }
 
-    double R = velocity * tau * (1 - exp(-y));
-    return R;
-}//辅助方法二计算速度。
+    return x; // 落点水平距离
+}
 
 double computeVelocityFromDistance(double distance) {
     double low = 10.0;       // mm/s
@@ -475,7 +475,7 @@ double define_fake_motor_speed(int velocity_calculating_method, double ball_x, d
     if (velocity_calculating_method == 1) {
         double flight_time = sqrt(off_table_height);
         double speed = flight_distance / flight_time;
-        double motor_speed = speed * config.velocity_factor_old;
+        double motor_speed = speed * config.velocity_factor_old / (ball_y > 0 ? config.paddle_z_left : config.paddle_z_right) / pi222 * 180;
 
         logger(Info, "Motor speed: ", motor_speed * config.projectile_coefficient);
 
@@ -484,7 +484,7 @@ double define_fake_motor_speed(int velocity_calculating_method, double ball_x, d
     if (velocity_calculating_method == 2) {
         double distance = flight_distance;
         double leaving_velocity = computeVelocityFromDistance(distance);
-        double motor_speed = leaving_velocity * config.velocity_factor_new;
+        double motor_speed = leaving_velocity * config.velocity_factor_new / (ball_y > 0 ? config.paddle_z_left : config.paddle_z_right) / pi222 * 180;
 
         logger(Info, "Motor speed : ", motor_speed);
 
@@ -524,12 +524,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_terminal.tran.y = ball_y - hitting_distance * sin(hitting_angle_rad);
             pos_terminal.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_terminal.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_terminal.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_terminal.rpy.ry = -90 * Deg2Rad;
                 pos_terminal.rpy.rz = 0;
             }
             else {
-                pos_terminal.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_terminal.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_terminal.rpy.ry = 90 * Deg2Rad;
                 pos_terminal.rpy.rz = 0;
             }
@@ -556,12 +556,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = -90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
             else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = 90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
@@ -581,12 +581,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad) * adjust.prepare_vertical_y_sign;
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = -90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
             else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = 90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
@@ -619,12 +619,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_terminal.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
             pos_terminal.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_terminal.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_terminal.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_terminal.rpy.ry = -90 * Deg2Rad;
                 pos_terminal.rpy.rz = 0;
             }
             else {
-                pos_terminal.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_terminal.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_terminal.rpy.ry = 90 * Deg2Rad;
                 pos_terminal.rpy.rz = 0;
             }
@@ -650,12 +650,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_preparing.tran.y = ball_y - (preparing_distance - adjust.prepare_distance) * sin(hitting_angle_rad);
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = -90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
             else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = 90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
@@ -675,12 +675,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad) * adjust.prepare_vertical_y_sign;
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = -90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
             else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = 90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
@@ -711,12 +711,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_terminal.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
             pos_terminal.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_terminal.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_terminal.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_terminal.rpy.ry = -90 * Deg2Rad;
                 pos_terminal.rpy.rz = 0;
             }
             else {
-                pos_terminal.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_terminal.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_terminal.rpy.ry = 90 * Deg2Rad;
                 pos_terminal.rpy.rz = 0;
             }
@@ -740,12 +740,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_preparing.tran.y = ball_y - (preparing_distance - adjust.prepare_distance) * sin(hitting_angle_rad);
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = -90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
             else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = 90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
@@ -765,12 +765,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad) * adjust.prepare_vertical_y_sign;
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = -90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
             else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = 90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
@@ -802,12 +802,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_terminal.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
             pos_terminal.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_terminal.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_terminal.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_terminal.rpy.ry = -90 * Deg2Rad;
                 pos_terminal.rpy.rz = 0;
             }
             else {
-                pos_terminal.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_terminal.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_terminal.rpy.ry = 90 * Deg2Rad;
                 pos_terminal.rpy.rz = 0;
             }
@@ -831,12 +831,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_preparing.tran.y = ball_y - (preparing_distance - adjust.prepare_distance) * sin(hitting_angle_rad);
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = -90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
             else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = 90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
@@ -857,12 +857,12 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
             pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad) * adjust.prepare_vertical_y_sign;
             pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
             if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = -90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
             else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+                pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
                 pos_preparing.rpy.ry = 90 * Deg2Rad;
                 pos_preparing.rpy.rz = 0;
             }
@@ -901,12 +901,12 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
     pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
     if (ball_y > 0) {
-        pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+        pos_preparing.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
         pos_preparing.rpy.ry = -90 * Deg2Rad;
         pos_preparing.rpy.rz = 0;
     }
     else {
-        pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+        pos_preparing.rpy.rx = (90 - hitting_angle) * Deg2Rad;
         pos_preparing.rpy.ry = 90 * Deg2Rad;
         pos_preparing.rpy.rz = 0;
     }
@@ -926,12 +926,12 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     pos_hitting.tran.y = ball_y - (2 * hitting_distance - preparing_distance) * sin(hitting_angle_rad);
     pos_hitting.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
     if (ball_y > 0) {
-        pos_hitting.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
+        pos_hitting.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
         pos_hitting.rpy.ry = -90 * Deg2Rad;
         pos_hitting.rpy.rz = 0;
     }
     else {
-        pos_hitting.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
+        pos_hitting.rpy.rx = (90 - hitting_angle) * Deg2Rad;
         pos_hitting.rpy.ry = 90 * Deg2Rad;
         pos_hitting.rpy.rz = 0;
     }
@@ -946,7 +946,7 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
     else
         jaka_reaching_time = sqrt(2.0 * (preparing_distance - hitting_distance) / config.jaka_acceleration); // Time to reach hitting position
 
-    double motor_reaching_time = 180 / motor_speed; // Time for motor to reach hitting position
+    double motor_reaching_time = 90 / motor_speed; // Time for motor to reach hitting position
 
     if (jaka_reaching_time > motor_reaching_time)
     {
