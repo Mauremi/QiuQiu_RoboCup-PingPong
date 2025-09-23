@@ -170,10 +170,10 @@ public:
         offsets_.push_back(offset);
         // write csv
         if (offset_file.is_open()) {
-            offset_file << y << ","
-                << x << ","
-                << y_offset << ","
+            offset_file << x << ","
+                << y << ","
                 << x_offset << ","
+                << y_offset << ","
                 << "normal" << std::endl;
         }
     }
