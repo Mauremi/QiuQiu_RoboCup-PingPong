@@ -110,17 +110,15 @@ struct Config {
     const double correction_coefficient_y = 0.8, correction_coefficient_x = 0.7;
     const int deviser_x = 100, deviser_y = 200; // Deviser for adjacent learning, used to calculate the distance
     const double fiction_factor = 0.86; // Fiction factor that affects the velocity when ball falling
+
+    // Scan Config
+    double y_start = -600, y_end = 600, y_step = 50;
+    double x_start = -50, x_end = 300, x_step = 50;
+    double speed = 5;
 } config;
 
 // 在 enum Logger 后添加
 enum ScanResult { Success, Stuck, OutOfReach };
-
-// 扫描配置
-struct ScanConfig {
-    double y_start = -600, y_end = 600, y_step = 50;
-    double x_start = -50, x_end = 300, x_step = 50;
-    double speed = 5;
-} scanConfig;
 
 
 struct Point
@@ -146,23 +144,6 @@ MotorIK mkmotor;
 void get_vision();      // vision thread function
 void get_referee();
 
-void clear_log_files() {
-    auto clear_file = [](const std::string& path) {
-        std::ofstream file(path, std::ios::trunc); // trunc 会清空文件
-        if (file.is_open()) {
-            file << ""; // 确保写入空内容
-            file.close();
-            logger(Info, "Cleared log file: ", path);
-        }
-        else {
-            logger(Error, "Failed to clear log file: ", path);
-        }
-        };
-    // 清除你关心的日志文件
-    std::string repo_path(config.repo_path);
-    clear_file(repo_path + "\\national\\static\\scan_log.csv");        // 如果你加了扫描功能
-}
-
 void scanWorkspace() {
     double last_x = 0, last_y = 0, last_z = 0;
 
@@ -176,7 +157,7 @@ void scanWorkspace() {
 
     logger(Hint, "Starting workspace scan (half-axis priority logic).");
 
-    std::ofstream log_file(string(config.repo_path) + "\\national\\static\\scan_log.csv");
+    std::ofstream log_file(string(config.repo_path) + "\\national\\static\\data_scan.csv", std::ios::trunc);
     if (!log_file.is_open()) {
         logger(Error, "Failed to open scan log file!");
         return;
@@ -185,16 +166,16 @@ void scanWorkspace() {
 
     int col = 0;
 
-    for (double x = scanConfig.x_start; x <= scanConfig.x_end; x += scanConfig.x_step) {
+    for (double x = config.x_start; x <= config.x_end; x += config.x_step) {
         int sign = 1;
 
-        double y_max = scanConfig.y_end;
+        double y_max = config.y_end;
 
         // ========= 1. 从 |y| 最大值向 0 扫描 =========
         bool found_outer_success = false;
         int left_outer_row = -1;
 
-        for (double y = y_max; sign * y > 0; y -= sign * scanConfig.y_step) {
+        for (double y = y_max; sign * y > 0; y -= sign * config.y_step) {
             if (found_outer_success) break;
 
             CartesianPose pos;
@@ -213,14 +194,14 @@ void scanWorkspace() {
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
-                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << ",,,,IK_Fail\n";
                 col++;
                 continue;
             }
 
-            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
             mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
 
             char response;
@@ -229,14 +210,14 @@ void scanWorkspace() {
 
             if (response == 'y') {
                 found_outer_success = true;
-                left_outer_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
+                left_outer_row = (int)((y - config.y_start) / config.y_step);
                 last_x = x; last_y = y; last_z = pos.tran.z;
 
                 log_file << col << "," << left_outer_row << "," << x << "," << y << "," << pos.tran.z
                     << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
             }
             else {
-                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
             }
@@ -245,13 +226,13 @@ void scanWorkspace() {
 
         sign = -1;
 
-        y_max = scanConfig.y_start;
+        y_max = config.y_start;
 
         // ========= 2. 从 y=0 向外扫描 =========
         bool found_inner_success = false;
         int right_inner_row = -1;
 
-        for (double y = 0; sign * y < sign * y_max; y += sign * scanConfig.y_step) {
+        for (double y = 0; sign * y < sign * y_max; y += sign * config.y_step) {
             if (found_inner_success) break;
 
             CartesianPose pos;
@@ -268,14 +249,14 @@ void scanWorkspace() {
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
-                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << ",,,,IK_Fail\n";
                 col++;
                 continue;
             }
 
-            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
 
             char response;
             logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
@@ -283,14 +264,14 @@ void scanWorkspace() {
 
             if (response == 'y') {
                 found_inner_success = true;
-                right_inner_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
+                right_inner_row = (int)((y - config.y_start) / config.y_step);
                 last_x = x; last_y = y; last_z = pos.tran.z;
 
                 log_file << col << "," << right_inner_row << "," << x << "," << y << "," << pos.tran.z
                     << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
             }
             else {
-                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
             }
@@ -299,13 +280,13 @@ void scanWorkspace() {
 
         sign = +1;
 
-        y_max = scanConfig.y_end;
+        y_max = config.y_end;
 
         // ========= 2. 从 y=0 向外扫描 =========
         found_inner_success = false;
         int left_inner_row = -1;
 
-        for (double y = 0; sign * y < sign * y_max; y += sign * scanConfig.y_step) {
+        for (double y = 0; sign * y < sign * y_max; y += sign * config.y_step) {
             if (found_inner_success) break;
 
             CartesianPose pos;
@@ -322,14 +303,14 @@ void scanWorkspace() {
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
-                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << ",,,,IK_Fail\n";
                 col++;
                 continue;
             }
 
-            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
             mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
 
             char response;
@@ -338,14 +319,14 @@ void scanWorkspace() {
 
             if (response == 'y') {
                 found_inner_success = true;
-                left_inner_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
+                left_inner_row = (int)((y - config.y_start) / config.y_step);
                 last_x = x; last_y = y; last_z = pos.tran.z;
 
                 log_file << col << "," << left_inner_row << "," << x << "," << y << "," << pos.tran.z
                     << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
             }
             else {
-                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
             }
@@ -355,13 +336,13 @@ void scanWorkspace() {
 
         sign = -1;
 
-        y_max = scanConfig.y_start;
+        y_max = config.y_start;
 
         // ========= 1. 从 |y| 最大值向 0 扫描 =========
         found_outer_success = false;
         int right_outer_row = -1;
 
-        for (double y = y_max; sign * y > 0; y -= sign * scanConfig.y_step) {
+        for (double y = y_max; sign * y > 0; y -= sign * config.y_step) {
             if (found_outer_success) break;
 
             CartesianPose pos;
@@ -380,14 +361,14 @@ void scanWorkspace() {
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
-                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << ",,,,IK_Fail\n";
                 col++;
                 continue;
             }
 
-            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
             mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
 
             char response;
@@ -396,14 +377,14 @@ void scanWorkspace() {
 
             if (response == 'y') {
                 found_outer_success = true;
-                left_outer_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
+                left_outer_row = (int)((y - config.y_start) / config.y_step);
                 last_x = x; last_y = y; last_z = pos.tran.z;
 
                 log_file << col << "," << left_outer_row << "," << x << "," << y << "," << pos.tran.z
                     << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
             }
             else {
-                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
             }
@@ -414,7 +395,7 @@ void scanWorkspace() {
         // ========= 3. 自动填充中间区域 =========
         if (left_outer_row >= 0 && left_inner_row >= 0) {
             for (int row = std::min<int>(left_outer_row, left_inner_row) + 1; row < std::max<int>(left_outer_row, left_inner_row); row++) {
-                double y_mid = scanConfig.y_start + row * scanConfig.y_step;
+                double y_mid = config.y_start + row * config.y_step;
                 double z_mid = (y_mid > 0) ? config.paddle_z_left : config.paddle_z_right;
                 log_file << col << "," << row << "," << x << "," << y_mid << "," << z_mid
                     << "," << x << "," << y_mid << "," << z_mid << ",Success\n";
@@ -424,7 +405,7 @@ void scanWorkspace() {
 
         if (right_outer_row >= 0 && right_inner_row >= 0) {
             for (int row = std::min<int>(right_outer_row, right_inner_row) + 1; row < std::max<int>(right_outer_row, right_inner_row); row++) {
-                double y_mid = scanConfig.y_start + row * scanConfig.y_step;
+                double y_mid = config.y_start + row * config.y_step;
                 double z_mid = (y_mid > 0) ? config.paddle_z_left : config.paddle_z_right;
                 log_file << col << "," << row << "," << x << "," << y_mid << "," << z_mid
                     << "," << x << "," << y_mid << "," << z_mid << ",Success\n";
