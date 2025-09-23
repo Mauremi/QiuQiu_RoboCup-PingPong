@@ -145,6 +145,7 @@ Point hitting_position;
 Point target;
 char cmd = 'H'; // Command for the robot
 std::mutex mtx;        // mutex for protecting shared resources
+std::ofstream offset_file;  // 覆盖
 JointValue jval;
 
 JAKAZuRobot demo;
@@ -171,6 +172,14 @@ public:
     void add_offset(const double x, const double y, const double y_offset, const double x_offset) {
         const Offset offset{ {x, y, 0, 0, 0}, y_offset, x_offset };
         offsets_.push_back(offset);
+        // write csv
+        if (offset_file.is_open()) {
+            offset_file << x << ","
+                << y << ","
+                << x_offset << ","
+                << y_offset << ","
+                << "normal" << std::endl;
+        }
     }
 
     // Get the offset for a specific position
@@ -938,6 +947,8 @@ void read_config()
 int main()
 {
     read_config();
+    offset_file.open(string(config.repo_path) + "\\national\\static\\data_offsets.csv", std::ios::trunc);
+    offset_file << "x,y,x_offset,y_offset,point_type" << std::endl;
 
     logger(Info, "Main loop started.");
 
