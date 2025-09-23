@@ -186,119 +186,249 @@ void scanWorkspace() {
     int col = 0;
 
     for (double x = scanConfig.x_start; x <= scanConfig.x_end; x += scanConfig.x_step) {
-        // 先处理 y > 0 的半轴，再处理 y < 0 的半轴
-        for (int sign : {+1, -1}) {
-            double y_max = (sign > 0) ? scanConfig.y_end : scanConfig.y_start;
+        int sign = 1;
 
-            // ========= 1. 从 |y| 最大值向 0 扫描 =========
-            bool found_outer_success = false;
-            int outer_row = -1;
+        double y_max = scanConfig.y_end;
 
-            for (double y = y_max; sign * y > 0; y -= sign * scanConfig.y_step) {
-                if (found_outer_success) break;
+        // ========= 1. 从 |y| 最大值向 0 扫描 =========
+        bool found_outer_success = false;
+        int left_outer_row = -1;
 
-                CartesianPose pos;
-                pos.tran.x = x;
-                pos.tran.y = y;
-                pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
-                pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
-                pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
-                pos.rpy.rz = 0;
+        for (double y = y_max; sign * y > 0; y -= sign * scanConfig.y_step) {
+            if (found_outer_success) break;
 
-                JointValue jvalHome;
-                try {
-                    demo.kine_inverse(&jval, &pos, &jvalHome);
-                }
-                catch (const std::runtime_error& e) {
-                    logger(Error, "IK failed at (", x, ",", y, ")");
-                    log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
-                        << "," << x << "," << y << "," << pos.tran.z
-                        << ",,,,IK_Fail\n";
-                    col++;
-                    continue;
-                }
+            CartesianPose pos;
+            pos.tran.x = x;
+            pos.tran.y = y;
+            pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
+            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.rz = 0;
 
-                demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
 
-                char response;
-                logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
-                std::cin >> response;
 
-                if (response == 'y') {
-                    found_outer_success = true;
-                    outer_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
-                    last_x = x; last_y = y; last_z = pos.tran.z;
-
-                    log_file << col << "," << outer_row << "," << x << "," << y << "," << pos.tran.z
-                        << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
-                }
-                else {
-                    log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
-                        << "," << x << "," << y << "," << pos.tran.z
-                        << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
-                }
+            JointValue jvalHome;
+            try {
+                demo.kine_inverse(&jval, &pos, &jvalHome);
+            }
+            catch (const std::runtime_error& e) {
+                logger(Error, "IK failed at (", x, ",", y, ")");
+                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                    << "," << x << "," << y << "," << pos.tran.z
+                    << ",,,,IK_Fail\n";
                 col++;
+                continue;
             }
 
-            // ========= 2. 从 y=0 向外扫描 =========
-            bool found_inner_success = false;
-            int inner_row = -1;
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+            mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
 
-            for (double y = 0; sign * y < sign * y_max; y += sign * scanConfig.y_step) {
-                if (found_inner_success) break;
+            char response;
+            logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
+            std::cin >> response;
 
-                CartesianPose pos;
-                pos.tran.x = x;
-                pos.tran.y = y;
-                pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
-                pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
-                pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
-                pos.rpy.rz = 0;
+            if (response == 'y') {
+                found_outer_success = true;
+                left_outer_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
+                last_x = x; last_y = y; last_z = pos.tran.z;
 
-                JointValue jvalHome;
-                try {
-                    demo.kine_inverse(&jval, &pos, &jvalHome);
-                }
-                catch (const std::runtime_error& e) {
-                    logger(Error, "IK failed at (", x, ",", y, ")");
-                    log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
-                        << "," << x << "," << y << "," << pos.tran.z
-                        << ",,,,IK_Fail\n";
-                    col++;
-                    continue;
-                }
+                log_file << col << "," << left_outer_row << "," << x << "," << y << "," << pos.tran.z
+                    << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
+            }
+            else {
+                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                    << "," << x << "," << y << "," << pos.tran.z
+                    << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
+            }
+            col++;
+        }
 
-                demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+        sign = -1;
 
-                char response;
-                logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
-                std::cin >> response;
+        y_max = scanConfig.y_start;
 
-                if (response == 'y') {
-                    found_inner_success = true;
-                    inner_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
-                    last_x = x; last_y = y; last_z = pos.tran.z;
+        // ========= 2. 从 y=0 向外扫描 =========
+        bool found_inner_success = false;
+        int right_inner_row = -1;
 
-                    log_file << col << "," << inner_row << "," << x << "," << y << "," << pos.tran.z
-                        << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
-                }
-                else {
-                    log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
-                        << "," << x << "," << y << "," << pos.tran.z
-                        << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
-                }
+        for (double y = 0; sign * y < sign * y_max; y += sign * scanConfig.y_step) {
+            if (found_inner_success) break;
+
+            CartesianPose pos;
+            pos.tran.x = x;
+            pos.tran.y = y;
+            pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
+            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.rz = 0;
+
+            JointValue jvalHome;
+            try {
+                demo.kine_inverse(&jval, &pos, &jvalHome);
+            }
+            catch (const std::runtime_error& e) {
+                logger(Error, "IK failed at (", x, ",", y, ")");
+                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                    << "," << x << "," << y << "," << pos.tran.z
+                    << ",,,,IK_Fail\n";
                 col++;
+                continue;
             }
 
-            // ========= 3. 自动填充中间区域 =========
-            if (outer_row >= 0 && inner_row >= 0) {
-                for (int row = std::min<int>(outer_row, inner_row) + 1;row < std::max<int>(outer_row, inner_row);row++) {
-                    double y_mid = scanConfig.y_start + row * scanConfig.y_step;
-                    double z_mid = (y_mid > 0) ? config.paddle_z_left : config.paddle_z_right;
-                    log_file << col << "," << row << "," << x << "," << y_mid << "," << z_mid
-                        << "," << x << "," << y_mid << "," << z_mid << ",Success\n";
-                    col++;
-                }
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+
+            char response;
+            logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
+            std::cin >> response;
+
+            if (response == 'y') {
+                found_inner_success = true;
+                right_inner_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
+                last_x = x; last_y = y; last_z = pos.tran.z;
+
+                log_file << col << "," << right_inner_row << "," << x << "," << y << "," << pos.tran.z
+                    << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
+            }
+            else {
+                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                    << "," << x << "," << y << "," << pos.tran.z
+                    << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
+            }
+            col++;
+        }
+
+        sign = +1;
+
+        y_max = scanConfig.y_end;
+
+        // ========= 2. 从 y=0 向外扫描 =========
+        found_inner_success = false;
+        int left_inner_row = -1;
+
+        for (double y = 0; sign * y < sign * y_max; y += sign * scanConfig.y_step) {
+            if (found_inner_success) break;
+
+            CartesianPose pos;
+            pos.tran.x = x;
+            pos.tran.y = y;
+            pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
+            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.rz = 0;
+
+            JointValue jvalHome;
+            try {
+                demo.kine_inverse(&jval, &pos, &jvalHome);
+            }
+            catch (const std::runtime_error& e) {
+                logger(Error, "IK failed at (", x, ",", y, ")");
+                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                    << "," << x << "," << y << "," << pos.tran.z
+                    << ",,,,IK_Fail\n";
+                col++;
+                continue;
+            }
+
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+            mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
+
+            char response;
+            logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
+            std::cin >> response;
+
+            if (response == 'y') {
+                found_inner_success = true;
+                left_inner_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
+                last_x = x; last_y = y; last_z = pos.tran.z;
+
+                log_file << col << "," << left_inner_row << "," << x << "," << y << "," << pos.tran.z
+                    << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
+            }
+            else {
+                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                    << "," << x << "," << y << "," << pos.tran.z
+                    << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
+            }
+            col++;
+        }
+
+
+        sign = -1;
+
+        y_max = scanConfig.y_start;
+
+        // ========= 1. 从 |y| 最大值向 0 扫描 =========
+        found_outer_success = false;
+        int right_outer_row = -1;
+
+        for (double y = y_max; sign * y > 0; y -= sign * scanConfig.y_step) {
+            if (found_outer_success) break;
+
+            CartesianPose pos;
+            pos.tran.x = x;
+            pos.tran.y = y;
+            pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
+            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
+            pos.rpy.rz = 0;
+
+
+
+            JointValue jvalHome;
+            try {
+                demo.kine_inverse(&jval, &pos, &jvalHome);
+            }
+            catch (const std::runtime_error& e) {
+                logger(Error, "IK failed at (", x, ",", y, ")");
+                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                    << "," << x << "," << y << "," << pos.tran.z
+                    << ",,,,IK_Fail\n";
+                col++;
+                continue;
+            }
+
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, scanConfig.speed);
+            mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
+
+            char response;
+            logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
+            std::cin >> response;
+
+            if (response == 'y') {
+                found_outer_success = true;
+                left_outer_row = (int)((y - scanConfig.y_start) / scanConfig.y_step);
+                last_x = x; last_y = y; last_z = pos.tran.z;
+
+                log_file << col << "," << left_outer_row << "," << x << "," << y << "," << pos.tran.z
+                    << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
+            }
+            else {
+                log_file << col << "," << (int)((y - scanConfig.y_start) / scanConfig.y_step)
+                    << "," << x << "," << y << "," << pos.tran.z
+                    << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
+            }
+            col++;
+        }
+
+
+        // ========= 3. 自动填充中间区域 =========
+        if (left_outer_row >= 0 && left_inner_row >= 0) {
+            for (int row = std::min<int>(left_outer_row, left_inner_row) + 1; row < std::max<int>(left_outer_row, left_inner_row); row++) {
+                double y_mid = scanConfig.y_start + row * scanConfig.y_step;
+                double z_mid = (y_mid > 0) ? config.paddle_z_left : config.paddle_z_right;
+                log_file << col << "," << row << "," << x << "," << y_mid << "," << z_mid
+                    << "," << x << "," << y_mid << "," << z_mid << ",Success\n";
+                col++;
+            }
+        }
+
+        if (right_outer_row >= 0 && right_inner_row >= 0) {
+            for (int row = std::min<int>(right_outer_row, right_inner_row) + 1; row < std::max<int>(right_outer_row, right_inner_row); row++) {
+                double y_mid = scanConfig.y_start + row * scanConfig.y_step;
+                double z_mid = (y_mid > 0) ? config.paddle_z_left : config.paddle_z_right;
+                log_file << col << "," << row << "," << x << "," << y_mid << "," << z_mid
+                    << "," << x << "," << y_mid << "," << z_mid << ",Success\n";
+                col++;
             }
         }
     }
