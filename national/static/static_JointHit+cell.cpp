@@ -99,12 +99,12 @@ struct Config {
     // Motor speed 
     const double table_height_left = 760, table_height_right = 760;  // table height (left and right). If table is not flat, set the height of the left and right side of the table.
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
+    const double little_motor_speed = 450;
 
     // Paddle location
     const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double paddle_ball_center_preparing_distance = 60;
-
 
     // Settings (IFs)
     const bool if_record_trajectory = true; // if record trajectory
@@ -1136,12 +1136,48 @@ int main()
             joint_hit(config.paddle_ball_center_hitting_distance, config.paddle_ball_center_preparing_distance, ball_x, ball_y, hitting_angle, speed);
         }
         else {
-            target = ball_y > 0 ? Point{ targets[3].first, targets[2].second, 0, 0, 0 } : Point{ targets[1].first, targets[1].second, 0, 0, 0 };
+            target = ball_y > 0 ? Point{ targets[3].first, targets[3].second, 0, 0, 0 } : Point{ targets[1].first, targets[1].second, 0, 0, 0 };
             //计算角度
             hitting_angle = calculate_hitting_angle(ball_position.x, ball_position.y, target.x, target.y);
             double hitting_angle_rad = hitting_angle * Deg2Rad;
 
+            pos.tran.x = ball_x - config.paddle_ball_center_hitting_distance * cos(hitting_angle_rad);
+            pos.tran.y = ball_y - config.paddle_ball_center_hitting_distance * sin(hitting_angle_rad);
+            pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
+            if (ball_y > 0) {
+                pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+                pos.rpy.ry = -90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
+            else {
+                pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+                pos.rpy.ry = 90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
+
+            double ini_angle = -90;
+
+            try {
+                demo.kine_inverse(&jval, &pos, &jvalH);
+            }
+            catch (std::runtime_error) {
+                logger(Error, "inverse error!");
+            }
+
+            logger(Move, "Jaka mini and motor preparing.");
+            mkmotor.goToPos2(ini_angle, 1, 200, false);
+            demo.joint_move(&jvalH, MoveMode::ABS, true, 1);
+
+            Sleep(200);
+
+            // Decide the speed based on the ball position
+            double speed = config.little_motor_speed;
+
+            logger(Info, "Motor hitting speed: ", speed, ".");
+
+            logger(Move, "Motor hitting.");
+            mkmotor.goToPos2((ball_y > 0) ? (ini_angle - 180) : (ini_angle + 180), 0, speed, false); // !DIRECTION
         }
 
         if (config.if_record_trajectory)
