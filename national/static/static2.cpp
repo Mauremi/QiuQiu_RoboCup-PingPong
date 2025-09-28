@@ -27,6 +27,8 @@
 #include <vector>
 #include <fstream>
 
+#include "net/util.h"
+
 using namespace std;
 using std::chrono::high_resolution_clock;
 using std::chrono::milliseconds;
@@ -124,6 +126,7 @@ struct Config {
     const double correction_coefficient_y = 0.8, correction_coefficient_x = 0;
     const int deviser_x = 100, deviser_y = 200; // Deviser for adjacent learning, used to calculate the distance
     const double fiction_factor = 0.87; // Fiction factor that affects the velocity when ball falling
+    const double check_bounce_threshold = 3.0;
 } config;
 
 
@@ -282,6 +285,48 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
     return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
 }
 
+bool is_valid_offset(std::vector<Point>& full_track) {
+    double half_table_length = TABLE_LENGTH / 2.0;
+
+	size_t n = full_track.size();
+    size_t cross_idx = n;
+    for (size_t i = 0; i < n; ++i) {
+        if (full_track[i].x > half_table_length){
+	        cross_idx = i; break;
+        }
+    }
+
+    if (cross_idx == n || cross_idx < 2 || (n - cross_idx) < 2) {
+        return true; 
+    }
+
+    Point p1 = full_track[cross_idx - 2];
+    Point p2 = full_track[cross_idx - 1];
+    double vx1 = p2.x - p1.x;
+    double vy1 = p2.y - p1.y;
+
+    Point q1 = full_track[cross_idx];
+    Point q2 = full_track[cross_idx + 1];
+    double vx2 = q2.x - q1.x;
+    double vy2 = q2.y - q1.y;
+
+    double dot = vx1 * vx2 + vy1 * vy2;
+    double norm1 = sqrt(vx1 * vx1 + vy1 * vy1);
+    double norm2 = sqrt(vx2 * vx2 + vy2 * vy2);
+    if (norm1 < 1e-6 || norm2 < 1e-6) return true; // 向量过短，无法判定 => 认为有效
+
+    double cos_theta = dot / (norm1 * norm2);
+    if (cos_theta > 1.0) cos_theta = 1.0;
+    else if (cos_theta < -1.0) cos_theta = -1.0;
+
+    const double PI = std::acos(-1.0);
+    double angle_deg = std::acos(cos_theta) * 180.0 / PI;
+
+    logger(Info, "Bounce angle = ", angle_deg, " deg (threshold ", config.check_bounce_threshold, " deg)");
+
+    return angle_deg <= config.check_bounce_threshold;
+};
+
 void record_trajectory() {
     // Open the CSV file for writing
     std::ofstream outfile(string(config.repo_path) + "\\national\\static\\data_trajectory.csv", std::ios::trunc);
@@ -298,7 +343,8 @@ void record_trajectory() {
         outfile << "time,x,y" << std::endl;
     }
 
-    queue<Point> track;  // Vector to store the trajectory points
+    std::queue<Point> track;  // Vector to store the trajectory points
+    std::vector<Point> full_track;
 
     Point last_ball_pos = { 0, 0, 0, 0, 0 };
 
@@ -338,11 +384,11 @@ void record_trajectory() {
         }
 
         track.push(current_ball); // Store the point in the track vector
-
         if (track.size() == 11)
         {
             track.pop();
         }
+        full_track.push_back(current_ball);
 
         // update the last ball position
         last_ball_pos = current_ball;
@@ -370,6 +416,14 @@ void record_trajectory() {
     double flight_time_ground = sqrt(2.0 * height_ground / GRAVITY);
     double predicted_ground_x = TABLE_LENGTH + velocity_x * flight_time_ground; // Predict the x value based on the velocity and flight time to ground
     double predicted_ground_y = predictor.predict(predicted_ground_x);
+
+    // if not valid offset, close file and return
+    if (!is_valid_offset(full_track)) {
+        logger(Info, "Invalid bounce detected. Offset will not be added.");
+        outfile.close();
+        if (config.if_record_trajectory) logger(Info, "Close file.");
+        return;
+    }
 
     if (config.if_adjacent_learning)
     {
