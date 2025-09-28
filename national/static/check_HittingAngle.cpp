@@ -482,8 +482,7 @@ int main()
         logger(Info, "Motor hitting speed: ", speed, ".");
 
         logger(Move, "Motor hitting.");
-        mkmotor.goToPos2((hitting_position.y > 0) ? -270 : 90, 0, false);
-        Sleep(2000);
+        mkmotor.goToPos2((hitting_position.y > 0) ? -270 : 90, 0, speed, false);
 
         if (config.if_record_trajectory)
         {

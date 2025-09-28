@@ -97,7 +97,7 @@ struct Config {
 
     // Paddle location
     const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
-    const double paddle_ball_center_distance = 40; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
+    const double paddle_ball_center_distance = 50; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double jaka_offset_x = 0, jaka_offset_y = 0; // offset for jaka mini, used to adjust the paddle position
 
     // Settings (IFs)
@@ -466,7 +466,7 @@ int main()
             demo.kine_inverse(&jval, &pos, &jvalH);
         }
         catch (std::runtime_error) {
-            std::cout << "inverse error!" << std::endl;
+            logger(Error, "Inverse error!");
             continue;
         }
 
@@ -481,21 +481,18 @@ int main()
 
         logger(Info, "Motor hitting speed: ", speed, ".");
 
-        logger(Info, "Waiting to be continue.");
+        logger(Move, "Motor hitting.");
+        mkmotor.goToPos2((hitting_position.y > 0) ? -270 : 90, 0, speed, false);
 
-        char ch = '\0';
-        while (ch != '\n') { ch = cin.get(); }
+        if (config.if_record_trajectory)
+        {
+            std::thread t2(record_trajectory);
+            t2.detach();
+        }
 
         logger(Move, "Jaka mini and motor returning.");
         mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
         demo.joint_move(&jval, MoveMode::ABS, true, 7);
-
-        if (config.if_record_trajectory)
-        {
-            while (ball_position.x < TABLE_LENGTH / 2 - 100) {}
-            std::thread t2(record_trajectory);
-            t2.detach();
-        }
 
         Sleep(900);
 

@@ -99,10 +99,10 @@ struct Config {
     // Motor speed 
     const double table_height_left = 760, table_height_right = 760;  // table height (left and right). If table is not flat, set the height of the left and right side of the table.
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
-    const double little_motor_speed = 450;
+    const double little_motor_speed = 400;
 
     // Paddle location
-    const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 264, paddle_z_right = 246; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double paddle_ball_center_preparing_distance = 60;
 
@@ -151,7 +151,7 @@ JointValue jval;
 JAKAZuRobot demo;
 MotorIK mkmotor;
 
-bool cell[7][24];
+bool cell[8][25];
 
 
 void get_vision();      // vision thread function
@@ -434,7 +434,7 @@ struct GridCell {
 };
 
 void load_reachability_map() {
-    std::ifstream file(string(config.repo_path) + "\\national\\static\\scan_log.csv");
+    std::ifstream file(string(config.repo_path) + "\\national\\static\\data_scan.csv");
     std::string line;
     std::getline(file, line); // header
 
@@ -470,11 +470,15 @@ void load_reachability_map() {
             cell[grid_x][grid_y] = false;
         }
     }
+
+    file.close();
 }
 
 bool decide_target(double ball_x, double ball_y, double hitting_distance, double preparing_distance, double hitting_angle) {
 
-    const double tol = 10; // 位置容差（mm）
+
+    demo.joint_move(&jval, MoveMode::ABS, true, 1);
+
 
     // 1. 计算击球点
     double hit_x = ball_x - hitting_distance * cos(hitting_angle * Deg2Rad);
@@ -505,404 +509,8 @@ bool decide_target(double ball_x, double ball_y, double hitting_distance, double
     return true;
 }
 
-bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& adjust, double& motor_speed, double ball_x, double ball_y, double hitting_angle)
-{
-
-    motor_speed -= (double)config.jaka_speed / ((ball_y > 0) ? config.paddle_z_left : config.paddle_z_right) / pi222 * 180;
-    // To be completed: check inverse error.
-    //先尝试沿着移动方向偏移，3cm后仍然error，则沿着垂直移动方向偏移至多2cm
-    adjust.ball_distance = 0;
-    adjust.prepare_distance = 0;
-    adjust.prepare_vertical = 0;
-
-    double hitting_angle_rad = hitting_angle * Deg2Rad;
-
-
-    if (ball_x < 100) //球在下边缘
-    {
-        adjust.ball_distance_x_sign = 1;
-        adjust.ball_distance_y_sign = 1;
-        adjust.prepare_vertical_x_sign = ball_y > 0 ? -1 : 1;
-        adjust.prepare_vertical_y_sign = ball_y > 0 ? 1 : -1;
-        //先确定终点的位置
-        bool can_terminal = false;
-        for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
-        {
-            ball_x += adjust.ball_distance * cos(hitting_angle_rad) * adjust.ball_distance_x_sign;
-            ball_y += adjust.ball_distance * sin(hitting_angle_rad) * adjust.ball_distance_y_sign;
-            CartesianPose pos_terminal;
-            pos_terminal.tran.x = ball_x - hitting_distance * cos(hitting_angle_rad);
-            pos_terminal.tran.y = ball_y - hitting_distance * sin(hitting_angle_rad);
-            pos_terminal.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_terminal.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_terminal.rpy.ry = -90 * Deg2Rad;
-                pos_terminal.rpy.rz = 0;
-            }
-            else {
-                pos_terminal.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_terminal.rpy.ry = 90 * Deg2Rad;
-                pos_terminal.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_terminal, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                can_terminal = true;
-                break;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        if (can_terminal == false)
-        {
-            logger(Error, "Can't find terminal position!"); return false;
-        }
-        //确定准备距离
-        for (; adjust.prepare_distance <= 30; adjust.prepare_distance += 5)
-        {
-            preparing_distance -= adjust.prepare_distance;
-            //try to inverse
-            CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad);
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
-            pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = -90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = 90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                return true;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        for (; adjust.prepare_vertical <= 15; adjust.prepare_vertical += 5)
-        {
-            //try to inverse
-            CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad) * adjust.prepare_vertical_x_sign;
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad) * adjust.prepare_vertical_y_sign;
-            pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = -90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = 90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                return true;
-            }
-            catch (std::runtime_error) { continue; }
-
-        }
-        return false;
-    }
-    if (ball_x >= 200) //球在上边缘
-    {
-        adjust.ball_distance_x_sign = -1;
-        adjust.ball_distance_y_sign = -1;
-        adjust.prepare_vertical_x_sign = ball_y > 0 ? 1 : -1;
-        adjust.prepare_vertical_y_sign = ball_y > 0 ? -1 : 1;
-        //确定调整终点
-        bool can_terminal = false;
-        for (; adjust.ball_distance <= 10; adjust.ball_distance = +1)
-        {
-            ball_x += adjust.ball_distance * cos(hitting_angle_rad) * adjust.ball_distance_x_sign;
-            ball_y += adjust.ball_distance * sin(hitting_angle_rad) * adjust.ball_distance_y_sign;
-            //try to inverse
-            CartesianPose pos_terminal;
-            pos_terminal.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad);
-            pos_terminal.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
-            pos_terminal.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_terminal.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_terminal.rpy.ry = -90 * Deg2Rad;
-                pos_terminal.rpy.rz = 0;
-            }
-            else {
-                pos_terminal.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_terminal.rpy.ry = 90 * Deg2Rad;
-                pos_terminal.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_terminal, &jvalH_preparing);
-                can_terminal = true;
-                break;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        if (can_terminal == false)
-        {
-            logger(Error, "Can't find terminal position!"); return false;
-        }
-        //确定准备距离
-        for (; adjust.prepare_distance <= 20; adjust.prepare_distance += 5)
-        {
-
-            //try to inverse
-            CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - (preparing_distance - adjust.prepare_distance) * cos(hitting_angle_rad);
-            pos_preparing.tran.y = ball_y - (preparing_distance - adjust.prepare_distance) * sin(hitting_angle_rad);
-            pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = -90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = 90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                return true;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        for (; adjust.prepare_vertical <= 15; adjust.prepare_vertical += 5)
-        {
-            //try to inverse
-            CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad) * adjust.prepare_vertical_x_sign;
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad) * adjust.prepare_vertical_y_sign;
-            pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = -90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = 90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                return true;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        return false;
-    }
-    if (ball_y > 300) //球在左边缘
-    {
-        adjust.ball_distance_x_sign = 1;
-        adjust.ball_distance_y_sign = -1;
-        adjust.prepare_vertical_x_sign = 1;
-        adjust.prepare_vertical_y_sign = -1;
-        bool can_terminal = false;
-        for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
-        {
-            ball_x += adjust.ball_distance * cos(hitting_angle_rad) * adjust.ball_distance_x_sign;
-            ball_y += adjust.ball_distance * sin(hitting_angle_rad) * adjust.ball_distance_y_sign;
-            //try to inverse
-            CartesianPose pos_terminal;
-            pos_terminal.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad);
-            pos_terminal.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
-            pos_terminal.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_terminal.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_terminal.rpy.ry = -90 * Deg2Rad;
-                pos_terminal.rpy.rz = 0;
-            }
-            else {
-                pos_terminal.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_terminal.rpy.ry = 90 * Deg2Rad;
-                pos_terminal.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_terminal, &jvalH_preparing);
-                can_terminal = true;
-                break;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        if (can_terminal == false)
-        {
-            logger(Error, "Can't find terminal position!"); return false;
-        }
-        for (; adjust.ball_distance <= 30; adjust.ball_distance += 5)
-        {
-            //try to inverse
-            CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - (preparing_distance - adjust.prepare_distance) * cos(hitting_angle_rad);
-            pos_preparing.tran.y = ball_y - (preparing_distance - adjust.prepare_distance) * sin(hitting_angle_rad);
-            pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = -90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = 90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                return true;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        for (; adjust.prepare_vertical <= 15; adjust.prepare_vertical += 5)
-        {
-            //try to inverse
-            CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad) * adjust.prepare_vertical_x_sign;
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad) * adjust.prepare_vertical_y_sign;
-            pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = -90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = 90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                return true;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        return false;
-    }
-    if (ball_y < -300) //球在右边缘
-    {
-        adjust.ball_distance_x_sign = 1;
-        adjust.ball_distance_y_sign = 1;
-        adjust.prepare_vertical_x_sign = 1;
-        adjust.prepare_vertical_y_sign = 1;
-        //确定终点位置    
-        bool can_terminal = false;
-        for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
-        {
-            ball_x += adjust.ball_distance * cos(hitting_angle_rad) * adjust.ball_distance_x_sign;
-            ball_y += adjust.ball_distance * sin(hitting_angle_rad) * adjust.ball_distance_y_sign;
-            //try to inverse
-            CartesianPose pos_terminal;
-            pos_terminal.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad);
-            pos_terminal.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad);
-            pos_terminal.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_terminal.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_terminal.rpy.ry = -90 * Deg2Rad;
-                pos_terminal.rpy.rz = 0;
-            }
-            else {
-                pos_terminal.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_terminal.rpy.ry = 90 * Deg2Rad;
-                pos_terminal.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_terminal, &jvalH_preparing);
-                can_terminal = true;
-                break;
-            }
-            catch (std::runtime_error) { continue; }
-        }
-        if (can_terminal == false)
-        {
-            logger(Error, "Can't find terminal position!"); return false;
-        }
-        for (; adjust.prepare_distance <= 20; adjust.prepare_distance += 5)
-        {
-            //try to inverse
-            CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - (preparing_distance - adjust.prepare_distance) * cos(hitting_angle_rad);
-            pos_preparing.tran.y = ball_y - (preparing_distance - adjust.prepare_distance) * sin(hitting_angle_rad);
-            pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = -90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = 90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                return true;
-            }
-            catch (std::runtime_error) { continue; }
-
-        }
-        for (; adjust.prepare_vertical <= 15; adjust.prepare_vertical += 5)
-        {
-            //try to inverse
-            CartesianPose pos_preparing;
-            pos_preparing.tran.x = ball_x - preparing_distance * cos(hitting_angle_rad) + adjust.prepare_vertical * sin(hitting_angle_rad) * adjust.prepare_vertical_x_sign;
-            pos_preparing.tran.y = ball_y - preparing_distance * sin(hitting_angle_rad) + adjust.prepare_vertical * cos(hitting_angle_rad) * adjust.prepare_vertical_y_sign;
-            pos_preparing.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-            if (ball_y > 0) {
-                pos_preparing.rpy.rx = (-90 + hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = -90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            else {
-                pos_preparing.rpy.rx = (90 - hitting_angle_rad) * Deg2Rad;
-                pos_preparing.rpy.ry = 90 * Deg2Rad;
-                pos_preparing.rpy.rz = 0;
-            }
-            JointValue jvalH_preparing;
-            try {
-                demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
-                logger(Info, "Inverse succeeded after adjusting ball_distance=", adjust.ball_distance, "prepare_distance=", adjust.prepare_distance, "prepare_vertical=", adjust.prepare_vertical, " mm .");
-                return true;
-            }
-            catch (std::runtime_error) { continue; }
-            return false;
-        }
-        return false;
-    }
-
-
-}
-
 void joint_hit(int hitting_distance, int preparing_distance, double ball_x, double ball_y, double hitting_angle, double motor_speed)
 {
-    Adjustment adjust;
-    adjust.ball_distance = 0;
-    adjust.prepare_distance = 0;
-    adjust.prepare_vertical = 0;
-
-    preparing_distance -= adjust.prepare_distance;
-    ball_x = ball_x + adjust.ball_distance * cos(hitting_angle * Deg2Rad) * adjust.ball_distance_x_sign + adjust.prepare_vertical_x_sign * sin(hitting_angle * Deg2Rad) * adjust.prepare_vertical;
-    ball_y = ball_y + adjust.ball_distance * sin(hitting_angle * Deg2Rad) * adjust.ball_distance_y_sign + adjust.prepare_vertical_y_sign * cos(hitting_angle * Deg2Rad) * adjust.prepare_vertical;
-
     double hitting_angle_rad = hitting_angle * Deg2Rad;
 
     // Move to preparing position
@@ -920,7 +528,7 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
         pos_preparing.rpy.ry = 90 * Deg2Rad;
         pos_preparing.rpy.rz = 0;
     }
-    JointValue jvalH_preparing;
+    JointValue jvalH_preparing{ 0, 0, 0, 0, 0, 0 };
     try {
         demo.kine_inverse(&jval, &pos_preparing, &jvalH_preparing);
     }
@@ -972,12 +580,11 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
         Sleep((int)((motor_reaching_time - jaka_reaching_time) * 1000));
         demo.linear_move(&pos_hitting, MoveMode::ABS, false, config.jaka_speed, config.jaka_acceleration, 5, nullptr);
     }
-
 }
 
 void get_correction_data()
 {
-    ifstream angle_file(string(config.repo_path) + "\\national\\static\\data_StaticAngle.csv");
+    ifstream angle_file(string(config.repo_path) + "\\national\\static\\data_AngleCorrection.csv");
 
     string line;
     getline(angle_file, line); // Skip the header line
@@ -1035,6 +642,8 @@ int main()
     t1.detach();
     logger(Info, "Vision system connected.");
 
+    load_reachability_map();
+
     if (config.if_referee)
     {
         std::thread referee_thread(get_referee);
@@ -1066,7 +675,7 @@ int main()
 
     errno_t ret = ERR_SUCC;
     logger(Move, "Jaka mini initializing.");
-    ret = demo.joint_move(&jval, MoveMode::ABS, true, 1);
+    demo.joint_move(&jval, MoveMode::ABS, true, 1);
 
     logger(Move, "Motor initializing.");
     double ini_dianji_degree = 0;
@@ -1085,6 +694,7 @@ int main()
         }
 
         if (cmd != 'k') continue;
+
 
         logger(Info, "Round ", hit_round, ".");
 
@@ -1132,10 +742,13 @@ int main()
 
         bool can_hit;
         can_hit = decide_target(ball_x, ball_y, config.paddle_ball_center_hitting_distance, config.paddle_ball_center_preparing_distance, hitting_angle);
+
         if (can_hit) {
+            logger(Info, "Can joint hit.");
             joint_hit(config.paddle_ball_center_hitting_distance, config.paddle_ball_center_preparing_distance, ball_x, ball_y, hitting_angle, speed);
         }
         else {
+            logger(Info, "Can only motor hit.");
             target = ball_y > 0 ? Point{ targets[3].first, targets[3].second, 0, 0, 0 } : Point{ targets[1].first, targets[1].second, 0, 0, 0 };
             //计算角度
             hitting_angle = calculate_hitting_angle(ball_position.x, ball_position.y, target.x, target.y);
