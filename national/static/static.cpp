@@ -113,6 +113,11 @@ struct Config {
     const double check_bounce_threshold = 3;
 } config;
 
+//构建一个二维地图
+struct GridCell {
+    bool is_reachable = false;
+    double actual_x = 0, actual_y = 0;
+};
 
 struct Point
 {
@@ -137,10 +142,12 @@ double score = 0;
 JAKAZuRobot demo;
 MotorIK mkmotor;
 
+bool cell[8][25];
+
 void get_vision();      // vision thread function
 void get_referee();
 void getBallLoc();
-
+void load_reachability_map();
 
 uint16_t combineBytes(uint8_t lowByte, uint8_t highByte) {
     return (highByte << 8) | lowByte;
@@ -262,6 +269,47 @@ public:
         return slope * x + intercept;
     }
 };
+
+void load_reachability_map() {
+    std::ifstream file(string(config.repo_path) + "\\national\\static\\data_scan.csv");
+    std::string line;
+    std::getline(file, line); // header
+
+
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 25; ++j) {
+            cell[i][j] = true;
+        }
+    }
+
+    while (std::getline(file, line)) {
+        std::stringstream ss(line);
+        std::string col_str, row_str, tx_str, ty_str, tz_str, ax_str, ay_str, az_str, status;
+        std::getline(ss, col_str, ',');
+        std::getline(ss, row_str, ',');
+        std::getline(ss, tx_str, ',');
+        std::getline(ss, ty_str, ',');
+        std::getline(ss, tz_str, ',');
+        std::getline(ss, ax_str, ',');
+        std::getline(ss, ay_str, ',');
+        std::getline(ss, az_str, ',');
+        std::getline(ss, status);
+
+        double tx, ty;
+        tx = std::stod(tx_str);
+        ty = std::stod(ty_str);
+
+        int grid_x, grid_y;
+        grid_x = (tx + 51) / 50;
+        grid_y = (ty + 601) / 50;
+
+        if (status != "Success") {
+            cell[grid_x][grid_y] = false;
+        }
+    }
+
+    file.close();
+}
 
 // calculate the angle to hit the ball
 double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, double posi_y)
@@ -685,6 +733,9 @@ int main()
     t1.detach();
     logger(Info, "Vision system connected.");
 
+    load_reachability_map();
+    logger(Info, "Map loading.")
+
     std::thread t2(getBallLoc);
     t2.detach(); // 分离线程，独立运行
 
@@ -722,6 +773,7 @@ int main()
     ret = demo.joint_move(&jval, MoveMode::ABS, true, 5);
 
     logger(Move, "Motor initializing.");
+
     double ini_dianji_degree = 0;
     mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
 
@@ -796,6 +848,15 @@ int main()
         }
         catch (std::runtime_error) {
             logger(Error, "inverse error! Trying to enumerate all targets.");
+            bool can = hit_enumeration(ball_x, ball_y, pos, jval, jvalH);
+            if (!can) continue;
+        }
+
+        int grid_x = (int)((pos.tran.x + 51) / 50);
+        int grid_y = (int)((pos.tran.y + 601) / 50);
+		bool can_hit = cell[grid_x][grid_y];
+        if (!can_hit) {
+            logger(Error, "This position can't arrive! Trying to enumerate all targets.");
             bool can = hit_enumeration(ball_x, ball_y, pos, jval, jvalH);
             if (!can) continue;
         }
