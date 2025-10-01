@@ -325,19 +325,16 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
     return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
 }
 
-bool is_valid_offset(std::vector<Point>& full_track) {
+bool is_valid_offset(std::vector<Point>& full_track) { 
     double half_table_length = TABLE_LENGTH / 2.0;
 
     size_t n = full_track.size();
+
     size_t cross_idx = n;
     for (size_t i = 0; i < n; ++i) {
         if (full_track[i].x > half_table_length) {
             cross_idx = i; break;
         }
-    }
-
-    if (cross_idx == n || cross_idx < 2 || (n - cross_idx) < 2) {
-        return true;
     }
 
     Point p1 = full_track[cross_idx - 2];
@@ -364,8 +361,39 @@ bool is_valid_offset(std::vector<Point>& full_track) {
 
     logger(Info, "Bounce angle = ", angle_deg, " deg (threshold ", config.check_bounce_threshold, " deg)");
 
-    return angle_deg <= config.check_bounce_threshold;
-};
+    if (angle_deg > config.check_bounce_threshold) {
+        logger(Info, "Invalid offset: angle jump detected.");
+        return false; 
+    }
+
+    // linear regression
+    double sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0;
+    for (const auto& pt : full_track) {
+        sum_x += pt.x;
+        sum_y += pt.y;
+        sum_xy += pt.x * pt.y;
+        sum_x2 += pt.x * pt.x;
+    }
+    double a = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x + 1e-8);
+    double b = (sum_y - a * sum_x) / n;
+
+    double mse = 0;
+    for (const auto& pt : full_track) {
+        double y_fit = a * pt.x + b;
+        mse += (pt.y - y_fit) * (pt.y - y_fit);
+    }
+    mse /= n;
+    double rmse = sqrt(mse);
+
+    logger(Info, "Trajectory RMSE = ", rmse, " (threshold ", config.check_bounce_rmse, ")");
+
+    if (rmse > config.check_bounce_rmse) {
+        logger(Info, "Invalid offset: trajectory wave detected.");
+        return false;
+    }
+
+    return true; 
+}
 
 void record_trajectory() {
     // Open the CSV file for writing
@@ -466,7 +494,7 @@ void record_trajectory() {
     logger(Info, "Offset y: ", offset_y, "; offset x: ", offset_x);
 
     // if not valid offset, close file and return
-    if (!is_valid_offset(full_track)) {
+    if (!is_valid_offset(full_track) || full_track.size() < 5) {
         logger(Info, "Invalid bounce detected. Offset will not be added.");
         outfile.close();
         if (config.if_record_trajectory) logger(Info, "Close file.");
