@@ -178,18 +178,17 @@ void scanWorkspace() {
     }
     log_file << "col,row,target_x,target_y,target_z,actual_x,actual_y,actual_z,status\n";
 
-    int col = 0;
 
     for (double x = config.x_start; x <= config.x_end; x += config.x_step) {
-        int sign = 1;
+
+        int row = -1;
 
         double y_max = config.y_end;
 
-        // ========= 1. 从 |y| 最大值向 0 扫描 =========
+        // ========= 1.从左往中扫 =========
         bool found_outer_success = false;
-        int left_outer_row = -1;
 
-        for (double y = y_max; sign * y > 0; y -= sign * config.y_step) {
+        for (double y = y_max; y > 0; y -= config.y_step) {
             if (found_outer_success) break;
 
             CartesianPose pos;
@@ -207,15 +206,15 @@ void scanWorkspace() {
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
-                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << ",,,,IK_Fail\n";
-                col++;
+
                 continue;
             }
 
             demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
-            mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
+            mkmotor.goToPos2(180, 1, false);
 
             char response;
             logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
@@ -223,29 +222,23 @@ void scanWorkspace() {
 
             if (response == 'y') {
                 found_outer_success = true;
-                left_outer_row = (int)((y - config.y_start) / config.y_step);
                 last_x = x; last_y = y; last_z = pos.tran.z;
 
-                log_file << col << "," << left_outer_row << "," << x << "," << y << "," << pos.tran.z
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step) << "," << x << "," << y << "," << pos.tran.z
                     << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
             }
             else {
-                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
             }
-            col++;
+
         }
 
-        sign = -1;
-
-        y_max = config.y_start;
-
-        // ========= 2. 从 y=0 向外扫描 =========
+        // ========= 2. 从中往右扫=========
         bool found_inner_success = false;
-        int right_inner_row = -1;
 
-        for (double y = 0; sign * y < sign * y_max; y += sign * config.y_step) {
+        for (double y = 0; y > (-1) * y_max; y -= config.y_step) {
             if (found_inner_success) break;
 
             CartesianPose pos;
@@ -270,10 +263,10 @@ void scanWorkspace() {
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
-                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << ",,,,IK_Fail\n";
-                col++;
+
                 continue;
             }
 
@@ -285,29 +278,24 @@ void scanWorkspace() {
 
             if (response == 'y') {
                 found_inner_success = true;
-                right_inner_row = (int)((y - config.y_start) / config.y_step);
+
                 last_x = x; last_y = y; last_z = pos.tran.z;
 
-                log_file << col << "," << right_inner_row << "," << x << "," << y << "," << pos.tran.z
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step) << "," << x << "," << y << "," << pos.tran.z
                     << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
             }
             else {
-                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
             }
-            col++;
+
         }
 
-        sign = +1;
-
-        y_max = config.y_end;
-
-        // ========= 2. 从 y=0 向外扫描 =========
+        // =========3.从中往左扫 =========
         found_inner_success = false;
-        int left_inner_row = -1;
 
-        for (double y = 0; sign * y < sign * y_max; y += sign * config.y_step) {
+        for (double y = 0; y < y_max; y += config.y_step) {
             if (found_inner_success) break;
 
             CartesianPose pos;
@@ -324,15 +312,15 @@ void scanWorkspace() {
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
-                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << ",,,,IK_Fail\n";
-                col++;
+
                 continue;
             }
 
             demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
-            mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
+            mkmotor.goToPos2(180, 1, false);
 
             char response;
             logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
@@ -340,30 +328,24 @@ void scanWorkspace() {
 
             if (response == 'y') {
                 found_inner_success = true;
-                left_inner_row = (int)((y - config.y_start) / config.y_step);
+
                 last_x = x; last_y = y; last_z = pos.tran.z;
 
-                log_file << col << "," << left_inner_row << "," << x << "," << y << "," << pos.tran.z
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step) << "," << x << "," << y << "," << pos.tran.z
                     << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
             }
             else {
-                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
             }
-            col++;
+
         }
 
-
-        sign = -1;
-
-        y_max = config.y_start;
-
-        // ========= 1. 从 |y| 最大值向 0 扫描 =========
+        // ========= 4.从右往中扫=========
         found_outer_success = false;
-        int right_outer_row = -1;
 
-        for (double y = y_max; sign * y > 0; y -= sign * config.y_step) {
+        for (double y = (-1) * y_max; y < 0; y += config.y_step) {
             if (found_outer_success) break;
 
             CartesianPose pos;
@@ -382,15 +364,15 @@ void scanWorkspace() {
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
-                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << ",,,,IK_Fail\n";
-                col++;
+
                 continue;
             }
 
             demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
-            mkmotor.goToPos2((sign > 0) ? 180 : 0, 1, false);
+            mkmotor.goToPos2(0, 1, false);
 
             char response;
             logger(Input, "Did robot reach (", x, ", ", y, ")? (y/n): ");
@@ -398,43 +380,19 @@ void scanWorkspace() {
 
             if (response == 'y') {
                 found_outer_success = true;
-                left_outer_row = (int)((y - config.y_start) / config.y_step);
                 last_x = x; last_y = y; last_z = pos.tran.z;
 
-                log_file << col << "," << left_outer_row << "," << x << "," << y << "," << pos.tran.z
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step) << "," << x << "," << y << "," << pos.tran.z
                     << "," << x << "," << y << "," << pos.tran.z << ",Success\n";
             }
             else {
-                log_file << col << "," << (int)((y - config.y_start) / config.y_step)
+                log_file << row << "," << (int)((y - config.y_start) / config.y_step)
                     << "," << x << "," << y << "," << pos.tran.z
                     << "," << last_x << "," << last_y << "," << last_z << ",Stuck\n";
             }
-            col++;
-        }
 
-
-        // ========= 3. 自动填充中间区域 =========
-        if (left_outer_row >= 0 && left_inner_row >= 0) {
-            for (int row = std::min<int>(left_outer_row, left_inner_row) + 1; row < std::max<int>(left_outer_row, left_inner_row); row++) {
-                double y_mid = config.y_start + row * config.y_step;
-                double z_mid = (y_mid > 0) ? config.paddle_z_left : config.paddle_z_right;
-                log_file << col << "," << row << "," << x << "," << y_mid << "," << z_mid
-                    << "," << x << "," << y_mid << "," << z_mid << ",Success\n";
-                col++;
-            }
-        }
-
-        if (right_outer_row >= 0 && right_inner_row >= 0) {
-            for (int row = std::min<int>(right_outer_row, right_inner_row) + 1; row < std::max<int>(right_outer_row, right_inner_row); row++) {
-                double y_mid = config.y_start + row * config.y_step;
-                double z_mid = (y_mid > 0) ? config.paddle_z_left : config.paddle_z_right;
-                log_file << col << "," << row << "," << x << "," << y_mid << "," << z_mid
-                    << "," << x << "," << y_mid << "," << z_mid << ",Success\n";
-                col++;
-            }
         }
     }
-
     log_file.close();
     logger(Info, "Scan completed with half-axis priority logic. Log saved to scan_log.csv");
 }
