@@ -111,6 +111,7 @@ struct Config {
     const int deviser_x = 100, deviser_y = 200; // Deviser for adjacent learning, used to calculate the distance
     const double fiction_factor = 0.87; // Fiction factor that affects the velocity when ball falling
     const double check_bounce_threshold = 3;
+    double check_bounce_rmse = 7;
 } config;
 
 //构建一个二维地图
@@ -325,7 +326,7 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
     return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
 }
 
-bool is_valid_offset(std::vector<Point>& full_track) { 
+bool is_valid_offset(std::vector<Point>& full_track) {
     double half_table_length = TABLE_LENGTH / 2.0;
 
     size_t n = full_track.size();
@@ -363,7 +364,7 @@ bool is_valid_offset(std::vector<Point>& full_track) {
 
     if (angle_deg > config.check_bounce_threshold) {
         logger(Info, "Invalid offset: angle jump detected.");
-        return false; 
+        return false;
     }
 
     // linear regression
@@ -392,7 +393,7 @@ bool is_valid_offset(std::vector<Point>& full_track) {
         return false;
     }
 
-    return true; 
+    return true;
 }
 
 void record_trajectory() {
@@ -494,7 +495,7 @@ void record_trajectory() {
     logger(Info, "Offset y: ", offset_y, "; offset x: ", offset_x);
 
     // if not valid offset, close file and return
-    if (!is_valid_offset(full_track) || full_track.push_back().x < 250) {
+    if (!is_valid_offset(full_track) || full_track.back().x < 250) {
         logger(Info, "Invalid bounce detected. Offset will not be added.");
         outfile.close();
         if (config.if_record_trajectory) logger(Info, "Close file.");
@@ -644,7 +645,7 @@ bool adjust_boundary(double ball_x, double ball_y, CartesianPose& pos, JointValu
             if (can_hit) return true;
         }
     }
-    else if (ball_x >= 20) //说明球在上边缘
+    else if (ball_x >= 250) //说明球在上边缘
     {
         for (adjust_round = 1; adjust_round <= 15; adjust_round++)
         {
@@ -660,9 +661,10 @@ bool adjust_boundary(double ball_x, double ball_y, CartesianPose& pos, JointValu
     {
         if (ball_y < 0) //球在右边
         {
-            for (double adjust_round = 1; adjust_round <= 15; adjust_round++)
+            for (double adjust_round = 1; adjust_round <= 50; adjust_round++)
             {
                 pos.tran.y -= adjust_length;
+                logger(Info, "try to move");
                 int grid_x = (int)((pos.tran.x + 51) / 50);
                 int grid_y = (int)((pos.tran.y + 601) / 50);
                 bool can_hit = cell[grid_x][grid_y];
@@ -671,7 +673,7 @@ bool adjust_boundary(double ball_x, double ball_y, CartesianPose& pos, JointValu
         }
         else //球在左边
         {
-            for (double adjust_round = 1; adjust_round <= 15; adjust_round++)
+            for (double adjust_round = 1; adjust_round <= 50; adjust_round++)
             {
                 pos.tran.y += adjust_length;
                 int grid_x = (int)((pos.tran.x + 51) / 50);
@@ -834,7 +836,7 @@ int main()
 
         double ini_angle = -90;
 
-        bool can;
+        bool can = true;
         try {
             demo.kine_inverse(&jval, &pos, &jvalH);
         }
@@ -852,7 +854,13 @@ int main()
             if (!can_hit) {
                 logger(Error, "All targets are error!Try to hit target 2.");
                 bool can = adjust_boundary(ball_x, ball_y, pos, jval, jvalH, target);
-                if (!can) continue;
+                if (!can) {
+                    if (config.if_referee)
+                    {
+                        while (cmd == 'k') {}
+                    }
+                    continue;
+                }
             }
         }
         else {
@@ -861,8 +869,14 @@ int main()
             bool can_hit = cell[grid_x][grid_y];
             if (!can_hit) {
                 logger(Error, "This position can't arrive! Trying to adjust boundary.");
-                bool can = adjust_boundary(ball_x, ball_y, pos, jval, jvalH, modified_target);
-                if (!can) continue;
+                can = adjust_boundary(ball_x, ball_y, pos, jval, jvalH, modified_target);
+                if (!can) {
+                    if (config.if_referee)
+                    {
+                        while (cmd == 'k') {}
+                    }
+                    continue;
+                }
             }
         }
 
