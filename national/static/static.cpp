@@ -494,7 +494,7 @@ void record_trajectory() {
     logger(Info, "Offset y: ", offset_y, "; offset x: ", offset_x);
 
     // if not valid offset, close file and return
-    if (!is_valid_offset(full_track) || full_track.size() < 5) {
+    if (!is_valid_offset(full_track) || full_track.push_back().x < 250) {
         logger(Info, "Invalid bounce detected. Offset will not be added.");
         outfile.close();
         if (config.if_record_trajectory) logger(Info, "Close file.");
