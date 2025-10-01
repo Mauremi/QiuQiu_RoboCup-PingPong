@@ -11,9 +11,9 @@
 #include "endMotor/MotorIK.h"
 #include <windows.h>
 #include <time.h>
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/jkerr.h"
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/jktypes.h"
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/jkerr.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/jktypes.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
 #include <chrono>
 
 #include <thread>
@@ -78,8 +78,8 @@ std::map<int, std::pair<double, double>> targets = {
     {1, {TABLE_LENGTH + 280,  560}},
     {2, {TABLE_LENGTH + 280,  0}},
     {3, {TABLE_LENGTH + 280, -560}},
-    {4, {TABLE_LENGTH + 540,  250}},
-    {5, {TABLE_LENGTH + 540, -250}},
+    {4, {TABLE_LENGTH + 640,  250}},
+    {5, {TABLE_LENGTH + 640, -250}},
     {6, {TABLE_LENGTH + 780,  0}}
 };
 // No, x, y, score
@@ -144,6 +144,20 @@ MotorIK mkmotor;
 void get_vision();      // vision thread function
 void get_referee();
 
+// calculate the angle to hit the ball
+double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, double posi_y)
+{
+    double run_x = posi_x - ball_x;
+    double run_y = posi_y - ball_y;
+
+    double angle_rad = atan2(run_y, run_x);
+    double angle_deg = angle_rad * Rad2Deg;
+
+    logger(Info, "Calculated angle: ", angle_deg, " degrees.");
+
+    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+}
+
 void scanWorkspace() {
     double last_x = 0, last_y = 0, last_z = 0;
 
@@ -185,7 +199,6 @@ void scanWorkspace() {
             pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
             pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
             pos.rpy.rz = 0;
-
 
 
             JointValue jvalHome;
@@ -239,9 +252,17 @@ void scanWorkspace() {
             pos.tran.x = x;
             pos.tran.y = y;
             pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
-            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
-            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
-            pos.rpy.rz = 0;
+
+            if (y > 0) {
+                pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+                pos.rpy.ry = -90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
+            else {
+                pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+                pos.rpy.ry = 90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
 
             JointValue jvalHome;
             try {
