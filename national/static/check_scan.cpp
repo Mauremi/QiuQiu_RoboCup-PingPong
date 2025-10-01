@@ -155,7 +155,7 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
 
     logger(Info, "Calculated angle: ", angle_deg, " degrees.");
 
-    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+    return angle_deg;
 }
 
 void scanWorkspace() {
