@@ -90,8 +90,8 @@ std::map<int, std::pair<double, double>> targets = {
     {1, {TABLE_LENGTH + 280,  560}},
     {2, {TABLE_LENGTH + 280,  0}},
     {3, {TABLE_LENGTH + 280, -560}},
-    {4, {TABLE_LENGTH + 640,  250}},
-    {5, {TABLE_LENGTH + 640, -250}},
+    {4, {TABLE_LENGTH + 540,  250}},
+    {5, {TABLE_LENGTH + 540, -250}},
     {6, {TABLE_LENGTH + 780,  0}}
 };
 // No, x, y, score
@@ -104,16 +104,18 @@ struct Config {
     bool if_referee;
     const int velocity_calculating_method = 1;//or 2
 
+    const int goal_choice = 2;
+
     // motor speed
     int speed = 740; // Maximum speed for the motor
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
     const double projectile_coefficient = 0.6;
-    const double velocity_factor = 2.5;
+    const double velocity_factor = 0.6;
 
 
     // paddle position
-    const double paddle_z_left = 249, paddle_z_right = 240; // Paddle heights for left and right sides
+    const double paddle_z_left = 240, paddle_z_right = 240; // Paddle heights for left and right sides
     const double table_height_left = 760, table_height_right = 760;
     const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
     const double jaka_offset_x = 0, jaka_offset_y = -10;
@@ -121,7 +123,7 @@ struct Config {
     double moter_speed;
 
     // trajectory prediction
-    const double linear_weight_quadratic = 0.9; // Weight for linear prediction in trajectory prediction
+    const double linear_weight_quadratic = 0.5; // Weight for linear prediction in trajectory prediction
 
     // IFs
     const bool if_record_trajectory = true; // If record trajectory
@@ -153,6 +155,7 @@ int hitting_round = 1;
 char cmd = 'H';
 double hitting_angle = -10;
 JointValue jval, jvalH, inijval;
+vector<Point> full_track(200);
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
 bool is_hitting = false;
@@ -289,7 +292,7 @@ double calculate_leaving_angle(double ball_x, double ball_y, double posi_x, doub
     double angle_rad = atan2(run_y, run_x);
     double angle_deg = angle_rad * Rad2Deg;
 
-    logger(Info, "Calculated leaving angle: ", angle_deg, " degrees.");
+    logger(Info, "Calculated angle: ", angle_deg, " degrees.");
 
     return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
 }
@@ -486,39 +489,40 @@ void record_trajectory_after() {
     trajectory_outfile.close();  // close the file
 }
 
-// 计算落点距离
 double computeLandingDistance(double velocity) {
-    // 初始条件
-    double x = 0.0;      // mm
-    double z = 0.0;      // mm（桌边为 0，向下为正）
-    double vx = velocity; // mm/s
-    double vz = 0.0;      // mm/s
-
-    // 常量系数
     double k = 0.5 * AIR_DENSITY * DRAG_COEFF * BALL_AREA;  // g/mm
+    double tau = BALL_MASS / k;  // s
 
-    double H = TABLE_HEIGHT; // mm
+    double omega = velocity / BALL_RADIUS;  // rad/s
+    int s = -1;  // 前滚 -> Magnus 向下
 
-    // 积分迭代
-    while (z < H) {
-        // 速度大小
-        double v = std::sqrt(vx * vx + vz * vz);
+    auto f = [&](double y) {
+        double term1 = GRAVITY * tau * tau * (y + exp(-y) - 1);
+        double term2 = s * omega * velocity * tau * tau * (1 - (y + 1) * exp(-y));
+        double H = TABLE_HEIGHT;
+        return term1 - term2 - H;
+        };
 
-        // 阻力加速度
-        double ax = -(k / BALL_MASS) * v * vx;
-        double az = GRAVITY - (k / BALL_MASS) * v * vz;
+    auto df = [&](double y) {
+        double term1 = GRAVITY * tau * tau * (1 - exp(-y));
+        double term2 = s * omega * velocity * tau * tau * (-y * exp(-y));
+        return term1 - term2;
+        };
 
-        double DT = 0.4;
-
-        // Euler 积分
-        vx += ax * DT;
-        vz += az * DT;
-        x += vx * DT;
-        z += vz * DT;
+    // Newton 解 y
+    double y = 1.0;
+    for (int i = 0; i < 50; i++) {
+        double fy = f(y);
+        double dfy = df(y);
+        if (fabs(dfy) < 1e-9) break;
+        double y_new = y - fy / dfy;
+        if (fabs(y_new - y) < 1e-9) { y = y_new; break; }
+        y = y_new;
     }
 
-    return x; // 落点水平距离
-}
+    double R = velocity * tau * (1 - exp(-y));
+    return R;
+}//辅助方法二计算速度。
 
 double computeVelocityFromDistance(double distance) {
     double low = 10.0;       // mm/s
@@ -554,13 +558,18 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
         double speed = flight_distance / flight_time;
         double motor_speed = speed * config.velocity_factor;
 
+        logger(Info, "Motor speed: ", motor_speed * config.projectile_coefficient);
+
         return motor_speed * config.projectile_coefficient;
     }//平抛计算距离
     if (velocity_calculating_method == 2) {
         double distance = flight_distance;
-        double leaving_velocity = computeVelocityFromDistance(distance) * config.velocity_factor;
+        double leaving_velocity = computeVelocityFromDistance(distance);
+        double motor_speed = leaving_velocity * config.velocity_factor;
 
-        return leaving_velocity;
+        logger(Info, "Motor speed : ", motor_speed);
+
+        return motor_speed;
     }//空气动力学计算距离
 }
 
@@ -572,18 +581,15 @@ double calculate_hitting_angle(double coming_angle, double coming_velocity, doub
         + (5.0 / 7.0) * coming_velocity * std::cos(coming_angle);
 
     double phi = std::atan2(numerator, denominator);
-
-    logger(Info, "Calculated hitting_angle: ", phi * Rad2Deg);
-
-    return phi * Rad2Deg;
+    return phi;
 }//计算击球角度
 
 double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e) {
 
-    double phi = calculate_hitting_angle(coming_angle * Deg2Rad, coming_velocity, leaving_velocity, leaving_angle * Deg2Rad);
+    double phi = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
     const double numerator =
-        leaving_velocity * std::cos(leaving_angle * Deg2Rad - phi * Deg2Rad)
-        - e * coming_velocity * std::cos(phi * Deg2Rad - coming_angle * Deg2Rad);
+        leaving_velocity * std::cos(leaving_angle - phi)
+        - e * coming_velocity * std::cos(phi - coming_angle);
 
     const double denominator = 1.0 + e;
 
@@ -591,6 +597,16 @@ double calculate_hitting_velocity(double coming_angle, double coming_velocity, d
 }//计算击球速度
 
 
+void record_full_trajectory()
+{
+    full_track.clear();
+    while (!is_hitting)
+    {
+        mtx.lock();
+        full_track.push_back(ball_position);
+        mtx.unlock();
+    }
+}
 
 void trajectory_prediction()
 {
@@ -598,7 +614,7 @@ void trajectory_prediction()
     uint64_t time_start, time_end;
 
     if (config.if_record_trajectory) {
-        trajectory_outfile.open(string(config.repo_path) + "\\national\\dynamic\\data_trajectory.csv", std::ios::trunc);
+        trajectory_outfile.open(string(config.repo_path) + "\\special\\dynamic\\data_trajectory.csv", std::ios::trunc);
         if (!trajectory_outfile.is_open()) {
             logger(Error, "Failed to open trajectory CSV file.");
         }
@@ -606,6 +622,10 @@ void trajectory_prediction()
     }
 
     double x = 200;
+
+    std::thread full_trajectory(record_full_trajectory);
+    full_trajectory.detach();
+
     while (!is_hitting)
     {
         std::vector<Point> track = record_trajectory_before(10, time_start, time_end, config.hitting_threshold, 2740);
@@ -616,7 +636,7 @@ void trajectory_prediction()
         coming_velocity = sqrt(vx * vx + vy * vy);
 
         LinearPredictor lp(track);
-        QuadraticPredictor qp(track);
+        QuadraticPredictor qp(full_track);
 
         double y_linear_predicted = lp.predict(x);
         double y_quadratic_predicted = qp.predict(x);
@@ -633,12 +653,12 @@ void trajectory_prediction()
         mkmotor.goToPos2(go_to_left ? -160 : -20, 1, 400, false);
 
 
-        int target_index = go_to_left ? 5 : 4; // !!! ??
+        int target_index = go_to_left ? 10 - config.goal_choice : config.goal_choice; // !!! ??
         logger(Info, "Choose goal ", target_index, ".");
 
-        leaving_velocity = calculate_leaving_velocity(config.if_difficult_velocity, x, y_predicted, targets[target_index].first, targets[target_index].second);
         leaving_angle = calculate_leaving_angle(x, y_predicted, targets[target_index].first, targets[target_index].second);
-        hitting_angle = calculate_hitting_angle(coming_angle * Deg2Rad, coming_velocity, leaving_velocity, leaving_angle * Deg2Rad);
+        hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
+        leaving_velocity = calculate_leaving_velocity(config.if_difficult_velocity, x, y_predicted, targets[target_index].first, targets[target_index].second);
 
         CartesianPose pos;
         pos.tran.x = x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad) + config.jaka_offset_x;
@@ -731,9 +751,8 @@ void calculate_hit(int round)
     // hitting!
     while (ball_position.x >= config.hitting_threshold && cmd == 'k') {} // Wait for the ball to reach hitting position
     is_hitting = true;
-    double speed = calculate_hitting_velocity(coming_angle, coming_velocity, leaving_velocity, leaving_angle, 2.3);
-    mkmotor.goToPos2(go_to_left ? -270 : 90, 1, speed, false);
-    logger(Info, "Motor speed: ", speed);
+    config.speed = calculate_hitting_velocity(coming_angle, coming_velocity, leaving_velocity, leaving_angle, 0.8);
+    mkmotor.goToPos2(go_to_left ? -270 : 90, 1, config.speed, false);
     logger(Info, "Motor will hit when ball.x is ", ball_position.x);
 
     logger(Move, "Motor hitting.");
@@ -744,7 +763,7 @@ void calculate_hit(int round)
 
 void get_correction_data()
 {
-    ifstream angle_file(string(config.repo_path) + "\\national\\dynamic\\data_GoalAngle.csv");
+    ifstream angle_file(string(config.repo_path) + "\\special\\dynamic\\data_GoalAngle.csv");
 
     string line;
     getline(angle_file, line); // Skip the header line
@@ -861,35 +880,6 @@ void get_vision()
     SSL_WrapperPacket packet;
     std::vector<Point> ballP;
 
-    double a_x, b_x, c_x, a_y, b_y, c_y;
-
-    if (config.if_vision_correction)
-    {
-        ifstream correction_file(string(config.repo_path) + "\\special\\public\\visual_correction.csv");
-        string line;
-        getline(correction_file, line); // Skip the header line
-        getline(correction_file, line); // Read the first line
-
-        stringstream ss(line);
-
-        ss >> a_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> b_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> c_x;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> a_y;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> b_y;
-        ss.ignore(1, ','); // Ignore the comma
-        ss >> c_y;
-    }
-    else
-    {
-        a_x = 1.0; b_x = 0.0; c_x = 0.0;
-        a_y = 0.0; b_y = 1.0; c_y = 0.0;
-    }
-
     while (true)
     {
         if (client.receive(packet))
@@ -905,8 +895,8 @@ void get_vision()
                 {
                     SSL_DetectionBall ball = detection.balls(i);
                     Point pp;
-                    pp.x = a_x * ball.x() + b_x * ball.y() + c_x; // Apply correction
-                    pp.y = a_y * ball.x() + b_y * ball.y() + c_y; // Apply correction
+                    pp.x = ball.x(); // Apply correction
+                    pp.y = ball.y(); // Apply correction
                     pp.t = detection.t_capture();
                     mtx.lock();
                     ball_position = pp;
