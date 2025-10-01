@@ -96,7 +96,7 @@ struct Config {
     const double velocity_factor = 39.5; // velocity shift factor 35.5 for second targets
 
     // Paddle location
-    const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 250, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double jaka_offset_x = 0, jaka_offset_y = 0; // offset for jaka mini, used to adjust the paddle position
 
@@ -140,6 +140,7 @@ std::mutex mtx;        // mutex for protecting shared resources
 
 JAKAZuRobot demo;
 MotorIK mkmotor;
+CartesianPose pos;
 
 void get_vision();      // vision thread function
 void get_referee();
@@ -190,14 +191,20 @@ void scanWorkspace() {
 
         for (double y = y_max; y > 0; y -= config.y_step) {
             if (found_outer_success) break;
-
-            CartesianPose pos;
+            double hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[5]), std::get<1>(targets[5]));
             pos.tran.x = x;
             pos.tran.y = y;
             pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
-            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
-            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
-            pos.rpy.rz = 0;
+            if (y > 0) {
+                pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+                pos.rpy.ry = -90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
+            else {
+                pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+                pos.rpy.ry = 90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
 
 
             JointValue jvalHome;
@@ -240,7 +247,7 @@ void scanWorkspace() {
 
         for (double y = 0; y > (-1) * y_max; y -= config.y_step) {
             if (found_inner_success) break;
-
+            double hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[4]), std::get<1>(targets[4]));
             CartesianPose pos;
             pos.tran.x = x;
             pos.tran.y = y;
@@ -297,15 +304,21 @@ void scanWorkspace() {
 
         for (double y = 0; y < y_max; y += config.y_step) {
             if (found_inner_success) break;
-
+            double hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[5]), std::get<1>(targets[5]));
             CartesianPose pos;
             pos.tran.x = x;
             pos.tran.y = y;
             pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
-            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
-            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
-            pos.rpy.rz = 0;
-
+            if (y > 0) {
+                pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+                pos.rpy.ry = -90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
+            else {
+                pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+                pos.rpy.ry = 90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
             JointValue jvalHome;
             try {
                 demo.kine_inverse(&jval, &pos, &jvalHome);
@@ -347,14 +360,21 @@ void scanWorkspace() {
 
         for (double y = (-1) * y_max; y < 0; y += config.y_step) {
             if (found_outer_success) break;
-
+            double hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[4]), std::get<1>(targets[4]));
             CartesianPose pos;
             pos.tran.x = x;
             pos.tran.y = y;
             pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
-            pos.rpy.rx = ((y > 0) ? -90 : 90) * Deg2Rad;
-            pos.rpy.ry = ((y > 0) ? -90 : 90) * Deg2Rad;
-            pos.rpy.rz = 0;
+            if (y > 0) {
+                pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+                pos.rpy.ry = -90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
+            else {
+                pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+                pos.rpy.ry = 90 * Deg2Rad;
+                pos.rpy.rz = 0;
+            }
 
 
 
