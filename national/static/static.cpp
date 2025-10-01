@@ -396,6 +396,31 @@ bool is_valid_offset(std::vector<Point>& full_track) {
     return true;
 }
 
+double calculate_score(Point& landing_position) {
+    double distance;
+    int index;
+    for (int i = 1; i <= 6; i++) {
+        double target_x = targets[i].first;
+        double target_y = targets[i].second;
+        if (i == 1 || distance >= sqrt(pow(landing_position.x - target_x, 2) + pow(landing_position.y - target_y, 2))) {
+            distance = sqrt(pow(landing_position.x - target_x, 2) + pow(landing_position.y - target_y, 2));
+            index = i;
+        }
+    }
+
+    double full_score;
+    double radius;
+    switch (index)
+    {
+    case 1: case 3: full_score = 1.5; radius = 160; break;
+    case 2: full_score = 1; radius = 200; break;
+    case 4: case 5: default: full_score = 2.5; radius = 120; break;
+    case 6: full_score = 3; radius = 100; break;
+    }
+
+    return full_score * (1 - distance / radius);
+}
+
 void record_trajectory() {
     // Open the CSV file for writing
     std::ofstream outfile(string(config.repo_path) + "\\national\\static\\data_trajectory.csv", std::ios::trunc);
@@ -486,8 +511,7 @@ void record_trajectory() {
 
     double offset_y = target.y - landing_position.y;
     double offset_x = target.x - landing_position.x;
-    double offset = sqrt(pow(offset_x, 2) + pow(offset_y, 2));
-    double add_score = (offset < 100.0) ? (3.0 * (1 - offset / 100.0)) : 0;
+    double add_score = calculate_score(landing_position);
     score += add_score;
 
     logger(Info, "Add score: ", add_score, ". Now is ", score, ".");

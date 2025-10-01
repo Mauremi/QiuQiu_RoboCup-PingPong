@@ -148,6 +148,7 @@ struct Point
 };
 
 Point ball_position;
+Point landing_position;
 int balls_n;
 std::mutex mtx;
 std::ofstream trajectory_outfile;
@@ -156,6 +157,7 @@ char cmd = 'H';
 double hitting_angle = -10;
 JointValue jval, jvalH, inijval;
 double y_quadratic_predicted_;
+double score = 0;
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
 bool come_from_left = true;
@@ -166,6 +168,7 @@ MotorIK mkmotor;
 
 void get_vision();   // Function to get vision data
 void get_referee();  // Function to get referee data
+void getBallLoc();
 
 
 // Linear Predictors for trajectory prediction Class
@@ -423,6 +426,35 @@ std::vector<Point> record_trajectory_before(int maxCount, uint64_t& timeStart, u
     return track;
 }
 
+double calculate_score(Point landing_position) {
+    double distance;
+    int index;
+    for (int i = 1; i <= 6; i++) {
+        double target_x = targets[i].first;
+        double target_y = targets[i].second;
+        if (i == 1 || distance >= sqrt(pow(landing_position.x - target_x, 2) + pow(landing_position.y - target_y, 2))) {
+            distance = sqrt(pow(landing_position.x - target_x, 2) + pow(landing_position.y - target_y, 2));
+            index = i;
+        }
+    }
+
+    double full_score;
+    double radius;
+    switch (index)
+    {
+    case 1: case 3: full_score = 1.5; radius = 160; break;
+    case 2: full_score = 1; radius = 200; break;
+    case 4: case 5: default: full_score = 2.5; radius = 120; break;
+    case 6: full_score = 3; radius = 100; break;
+    }
+
+    logger(Info, "Close to target ", index);
+
+    double add_score = full_score * (1 - distance / radius);
+
+    return add_score > 0 ? add_score : 0;
+}
+
 void record_trajectory_after() {
     queue<Point> track;  // Vector to store the trajectory points
 
@@ -489,6 +521,14 @@ void record_trajectory_after() {
     offset_y -= predicted_y; // Calculate the offset based on the predicted y value
 
     trajectory_outfile << 0 << "," << TABLE_LENGTH << "," << predicted_y << std::endl;
+
+    Sleep(2000);
+
+    logger(Info, "Landing position: (", landing_position.x, ", ", landing_position.y, ")");
+
+    double add_score = calculate_score(landing_position);
+    score += add_score;
+    logger(Info, "Score add: ", add_score, ", current score: ", score);
 
     trajectory_outfile.close();  // close the file
 }
@@ -831,6 +871,10 @@ int main()
         std::thread t2(get_referee);
         t2.detach();
         logger(Info, "Referee system connected.");
+
+        std::thread t3(getBallLoc);
+        t3.detach();
+        logger(Info, "Sandbox system connected.");
     }
 
     demo.login_in(config.jaka_ip);
@@ -979,6 +1023,22 @@ void get_referee()
             if (packet.has_yellow())
             {
                 Referee_TeamInfo team = packet.yellow();
+            }
+        }
+    }
+    return;
+}
+
+void getBallLoc()
+{
+    RoboCupSSLClient client(10005, "224.5.23.3", "");
+    client.open(true); // 打开客户端连接
+    ppBallPos packet;
+    while (true) {
+        if (client.receive(packet)) {
+            if (packet.has_x() && packet.has_y()) {
+                landing_position.x = packet.x() + 2740;
+                landing_position.y = packet.y();
             }
         }
     }
