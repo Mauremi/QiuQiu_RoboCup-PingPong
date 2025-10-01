@@ -643,6 +643,7 @@ int main()
     logger(Info, "Vision system connected.");
 
     load_reachability_map();
+    logger(Info,"Map loading.")
 
     if (config.if_referee)
     {

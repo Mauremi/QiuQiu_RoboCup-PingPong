@@ -110,8 +110,14 @@ struct Config {
     const double correction_coefficient_y = 0.6, correction_coefficient_x = 1;
     const int deviser_x = 100, deviser_y = 200; // Deviser for adjacent learning, used to calculate the distance
     const double fiction_factor = 0.87; // Fiction factor that affects the velocity when ball falling
+    const double check_bounce_threshold = 3;
 } config;
 
+//构建一个二维地图
+struct GridCell {
+    bool is_reachable = false;
+    double actual_x = 0, actual_y = 0;
+};
 
 struct Point
 {
@@ -136,10 +142,12 @@ double score = 0;
 JAKAZuRobot demo;
 MotorIK mkmotor;
 
+bool cell[8][25];
+
 void get_vision();      // vision thread function
 void get_referee();
 void getBallLoc();
-
+void load_reachability_map();
 
 uint16_t combineBytes(uint8_t lowByte, uint8_t highByte) {
     return (highByte << 8) | lowByte;
@@ -262,6 +270,47 @@ public:
     }
 };
 
+void load_reachability_map() {
+    std::ifstream file(string(config.repo_path) + "\\national\\static\\data_scan.csv");
+    std::string line;
+    std::getline(file, line); // header
+
+
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 25; ++j) {
+            cell[i][j] = true;
+        }
+    }
+
+    while (std::getline(file, line)) {
+        std::stringstream ss(line);
+        std::string col_str, row_str, tx_str, ty_str, tz_str, ax_str, ay_str, az_str, status;
+        std::getline(ss, col_str, ',');
+        std::getline(ss, row_str, ',');
+        std::getline(ss, tx_str, ',');
+        std::getline(ss, ty_str, ',');
+        std::getline(ss, tz_str, ',');
+        std::getline(ss, ax_str, ',');
+        std::getline(ss, ay_str, ',');
+        std::getline(ss, az_str, ',');
+        std::getline(ss, status);
+
+        double tx, ty;
+        tx = std::stod(tx_str);
+        ty = std::stod(ty_str);
+
+        int grid_x, grid_y;
+        grid_x = (tx + 51) / 50;
+        grid_y = (ty + 601) / 50;
+
+        if (status != "Success") {
+            cell[grid_x][grid_y] = false;
+        }
+    }
+
+    file.close();
+}
+
 // calculate the angle to hit the ball
 double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, double posi_y)
 {
@@ -274,6 +323,76 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
     logger(Info, "Calculated angle: ", angle_deg, " degrees.");
 
     return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+}
+
+bool is_valid_offset(std::vector<Point>& full_track) { 
+    double half_table_length = TABLE_LENGTH / 2.0;
+
+    size_t n = full_track.size();
+
+    size_t cross_idx = n;
+    for (size_t i = 0; i < n; ++i) {
+        if (full_track[i].x > half_table_length) {
+            cross_idx = i; break;
+        }
+    }
+
+    Point p1 = full_track[cross_idx - 2];
+    Point p2 = full_track[cross_idx - 1];
+    double vx1 = p2.x - p1.x;
+    double vy1 = p2.y - p1.y;
+
+    Point q1 = full_track[cross_idx];
+    Point q2 = full_track[cross_idx + 1];
+    double vx2 = q2.x - q1.x;
+    double vy2 = q2.y - q1.y;
+
+    double dot = vx1 * vx2 + vy1 * vy2;
+    double norm1 = sqrt(vx1 * vx1 + vy1 * vy1);
+    double norm2 = sqrt(vx2 * vx2 + vy2 * vy2);
+    if (norm1 < 1e-6 || norm2 < 1e-6) return true; // 向量过短，无法判定 => 认为有效
+
+    double cos_theta = dot / (norm1 * norm2);
+    if (cos_theta > 1.0) cos_theta = 1.0;
+    else if (cos_theta < -1.0) cos_theta = -1.0;
+
+    const double PI = std::acos(-1.0);
+    double angle_deg = std::acos(cos_theta) * 180.0 / PI;
+
+    logger(Info, "Bounce angle = ", angle_deg, " deg (threshold ", config.check_bounce_threshold, " deg)");
+
+    if (angle_deg > config.check_bounce_threshold) {
+        logger(Info, "Invalid offset: angle jump detected.");
+        return false; 
+    }
+
+    // linear regression
+    double sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0;
+    for (const auto& pt : full_track) {
+        sum_x += pt.x;
+        sum_y += pt.y;
+        sum_xy += pt.x * pt.y;
+        sum_x2 += pt.x * pt.x;
+    }
+    double a = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x + 1e-8);
+    double b = (sum_y - a * sum_x) / n;
+
+    double mse = 0;
+    for (const auto& pt : full_track) {
+        double y_fit = a * pt.x + b;
+        mse += (pt.y - y_fit) * (pt.y - y_fit);
+    }
+    mse /= n;
+    double rmse = sqrt(mse);
+
+    logger(Info, "Trajectory RMSE = ", rmse, " (threshold ", config.check_bounce_rmse, ")");
+
+    if (rmse > config.check_bounce_rmse) {
+        logger(Info, "Invalid offset: trajectory wave detected.");
+        return false;
+    }
+
+    return true; 
 }
 
 void record_trajectory() {
@@ -292,7 +411,8 @@ void record_trajectory() {
         outfile << "time,x,y" << std::endl;
     }
 
-    queue<Point> track;  // Vector to store the trajectory points
+    std::queue<Point> track;  // Vector to store the trajectory points
+    std::vector<Point> full_track;
 
     Point last_ball_pos = { 0, 0, 0, 0, 0 };
 
@@ -332,11 +452,11 @@ void record_trajectory() {
         }
 
         track.push(current_ball); // Store the point in the track vector
-
         if (track.size() == 11)
         {
             track.pop();
         }
+        full_track.push_back(current_ball);
 
         // update the last ball position
         last_ball_pos = current_ball;
@@ -372,6 +492,14 @@ void record_trajectory() {
     logger(Info, "Add score: ", add_score, ". Now is ", score, ".");
 
     logger(Info, "Offset y: ", offset_y, "; offset x: ", offset_x);
+
+    // if not valid offset, close file and return
+    if (!is_valid_offset(full_track) || full_track.push_back().x < 250) {
+        logger(Info, "Invalid bounce detected. Offset will not be added.");
+        outfile.close();
+        if (config.if_record_trajectory) logger(Info, "Close file.");
+        return;
+    }
 
     if (hitting_position.y > 0) {
         learning_left.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
@@ -633,6 +761,9 @@ int main()
     t1.detach();
     logger(Info, "Vision system connected.");
 
+    load_reachability_map();
+    logger(Info, "Map loading.")
+
     std::thread t2(getBallLoc);
     t2.detach(); // 分离线程，独立运行
 
@@ -670,6 +801,7 @@ int main()
     ret = demo.joint_move(&jval, MoveMode::ABS, true, 5);
 
     logger(Move, "Motor initializing.");
+
     double ini_dianji_degree = 0;
     mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
 
@@ -744,6 +876,15 @@ int main()
         }
         catch (std::runtime_error) {
             logger(Error, "inverse error! Trying to enumerate all targets.");
+            bool can = hit_enumeration(ball_x, ball_y, pos, jval, jvalH);
+            if (!can) continue;
+        }
+
+        int grid_x = (int)((pos.tran.x + 51) / 50);
+        int grid_y = (int)((pos.tran.y + 601) / 50);
+		bool can_hit = cell[grid_x][grid_y];
+        if (!can_hit) {
+            logger(Error, "This position can't arrive! Trying to enumerate all targets.");
             bool can = hit_enumeration(ball_x, ball_y, pos, jval, jvalH);
             if (!can) continue;
         }
