@@ -97,7 +97,7 @@ struct Config {
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
 
     // Paddle location
-    const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 250, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
 
     // Settings (IFs)
@@ -396,7 +396,7 @@ bool is_valid_offset(std::vector<Point>& full_track) {
     return true;
 }
 
-double calculate_score(Point& landing_position) {
+double calculate_score(Point landing_position) {
     double distance;
     int index;
     for (int i = 1; i <= 6; i++) {
@@ -418,7 +418,11 @@ double calculate_score(Point& landing_position) {
     case 6: full_score = 3; radius = 100; break;
     }
 
-    return full_score * (1 - distance / radius);
+    logger(Info, "Close to target ", index);
+
+    double add_score = full_score * (1 - distance / radius);
+
+    return add_score > 0 ? add_score : 0;
 }
 
 void record_trajectory() {

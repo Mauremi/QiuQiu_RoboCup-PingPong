@@ -11,9 +11,9 @@
 #include "endMotor/MotorIK.h"
 #include <windows.h>
 #include <time.h>
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/jkerr.h"
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/jktypes.h"
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/jkerr.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/jktypes.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
 #include <chrono>
 
 #include <thread>
@@ -78,9 +78,9 @@ std::map<int, std::pair<double, double>> targets = {
     {1, {TABLE_LENGTH + 280,  560}},
     {2, {TABLE_LENGTH + 280,  0}},
     {3, {TABLE_LENGTH + 280, -560}},
-    {4, {TABLE_LENGTH + 540,  250}},
-    {5, {TABLE_LENGTH + 540, -250}},
-    {6, {TABLE_LENGTH + 780,  0}}
+    {4, {TABLE_LENGTH + 640,  250}},
+    {5, {TABLE_LENGTH + 640, -250}},
+    {6, {TABLE_LENGTH + 880,  0}}
 };
 // No, x, y, score
 
@@ -92,7 +92,7 @@ struct Config {
     bool if_referee;
 
     // speed
-    const double velocity_factor = 40; // velocity shift factor 35.5 for second targets
+    const double velocity_factor = 34.5; // velocity shift factor 35.5 for second targets
     const int jaka_speed = 620;
     const int jaka_acceleration = 4000;
 
@@ -101,7 +101,7 @@ struct Config {
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
 
     // Paddle location
-    const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 250, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double paddle_ball_center_preparing_distance = 60;
 
@@ -116,6 +116,9 @@ struct Config {
     const double correction_coefficient_y = 0.8, correction_coefficient_x = 0;
     const int deviser_x = 100, deviser_y = 200; // Deviser for adjacent learning, used to calculate the distance
     const double fiction_factor = 0.87; // Fiction factor that affects the velocity when ball falling
+
+    const double check_bounce_threshold = 3;
+    const double check_bounce_rmse = 7;
 } config;
 
 
@@ -140,6 +143,7 @@ struct Adjustment
 };
 
 Point ball_position;         // location of the ball
+Point landing_position;
 int balls_n;
 Point hitting_position;
 Point target;
@@ -147,12 +151,14 @@ char cmd = 'H'; // Command for the robot
 std::mutex mtx;        // mutex for protecting shared resources
 std::ofstream offset_file;  // 覆盖
 JointValue jval;
+double score = 0;
 
 JAKAZuRobot demo;
 MotorIK mkmotor;
 
 void get_vision();      // vision thread function
 void get_referee();
+void getBallLoc();
 
 
 class AdjacentLearning
@@ -286,6 +292,105 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
     return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
 }
 
+bool is_valid_offset(std::vector<Point>& full_track) {
+    double half_table_length = TABLE_LENGTH / 2.0;
+
+    size_t n = full_track.size();
+
+    size_t cross_idx = n;
+    for (size_t i = 0; i < n; ++i) {
+        if (full_track[i].x > half_table_length) {
+            cross_idx = i; break;
+        }
+    }
+
+    Point p1 = full_track[cross_idx - 2];
+    Point p2 = full_track[cross_idx - 1];
+    double vx1 = p2.x - p1.x;
+    double vy1 = p2.y - p1.y;
+
+    Point q1 = full_track[cross_idx];
+    Point q2 = full_track[cross_idx + 1];
+    double vx2 = q2.x - q1.x;
+    double vy2 = q2.y - q1.y;
+
+    double dot = vx1 * vx2 + vy1 * vy2;
+    double norm1 = sqrt(vx1 * vx1 + vy1 * vy1);
+    double norm2 = sqrt(vx2 * vx2 + vy2 * vy2);
+    if (norm1 < 1e-6 || norm2 < 1e-6) return true; // 向量过短，无法判定 => 认为有效
+
+    double cos_theta = dot / (norm1 * norm2);
+    if (cos_theta > 1.0) cos_theta = 1.0;
+    else if (cos_theta < -1.0) cos_theta = -1.0;
+
+    const double PI = std::acos(-1.0);
+    double angle_deg = std::acos(cos_theta) * 180.0 / PI;
+
+    logger(Info, "Bounce angle = ", angle_deg, " deg (threshold ", config.check_bounce_threshold, " deg)");
+
+    if (angle_deg > config.check_bounce_threshold) {
+        logger(Info, "Invalid offset: angle jump detected.");
+        return false;
+    }
+
+    // linear regression
+    double sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0;
+    for (const auto& pt : full_track) {
+        sum_x += pt.x;
+        sum_y += pt.y;
+        sum_xy += pt.x * pt.y;
+        sum_x2 += pt.x * pt.x;
+    }
+    double a = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x + 1e-8);
+    double b = (sum_y - a * sum_x) / n;
+
+    double mse = 0;
+    for (const auto& pt : full_track) {
+        double y_fit = a * pt.x + b;
+        mse += (pt.y - y_fit) * (pt.y - y_fit);
+    }
+    mse /= n;
+    double rmse = sqrt(mse);
+
+    logger(Info, "Trajectory RMSE = ", rmse, " (threshold ", config.check_bounce_rmse, ")");
+
+    if (rmse > config.check_bounce_rmse) {
+        logger(Info, "Invalid offset: trajectory wave detected.");
+        return false;
+    }
+
+    return true;
+}
+
+double calculate_score(Point landing_position) {
+    double distance;
+    int index;
+    for (int i = 1; i <= 6; i++) {
+        double target_x = targets[i].first;
+        double target_y = targets[i].second;
+        if (i == 1 || distance >= sqrt(pow(landing_position.x - target_x, 2) + pow(landing_position.y - target_y, 2))) {
+            distance = sqrt(pow(landing_position.x - target_x, 2) + pow(landing_position.y - target_y, 2));
+            index = i;
+        }
+    }
+
+    double full_score;
+    double radius;
+    switch (index)
+    {
+    case 1: case 3: full_score = 1.5; radius = 160; break;
+    case 2: full_score = 1; radius = 200; break;
+    case 4: case 5: default: full_score = 2.5; radius = 120; break;
+    case 6: full_score = 3; radius = 100; break;
+    }
+
+    logger(Info, "Close to target ", index);
+
+    double add_score = full_score * (1 - distance / radius);
+
+    return add_score > 0 ? add_score : 0;
+}
+
 void record_trajectory() {
     // Open the CSV file for writing
     std::ofstream outfile(string(config.repo_path) + "\\national\\static\\data_trajectory.csv", std::ios::trunc);
@@ -302,7 +407,8 @@ void record_trajectory() {
         outfile << "time,x,y" << std::endl;
     }
 
-    queue<Point> track;  // Vector to store the trajectory points
+    std::queue<Point> track;  // Vector to store the trajectory points
+    std::vector<Point> full_track;
 
     Point last_ball_pos = { 0, 0, 0, 0, 0 };
 
@@ -342,15 +448,17 @@ void record_trajectory() {
         }
 
         track.push(current_ball); // Store the point in the track vector
-
         if (track.size() == 11)
         {
             track.pop();
         }
+        full_track.push_back(current_ball);
 
         // update the last ball position
         last_ball_pos = current_ball;
     }
+
+    Sleep(2000);
 
     // Not enough points recorded, close the file and return
     if (track.size() <= 5) {
@@ -363,38 +471,36 @@ void record_trajectory() {
 
     double predicted_edge_y = predictor.predict(TABLE_LENGTH); // Predict the y value for the current x position
 
-    // predict the landing position
-    double velocity_x = config.fiction_factor * (track.back().x - track.front().x) / (track.back().t - track.front().t);
-    double height = (TABLE_WIDTH / 2 + predicted_edge_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - SANDBOX_HEIGHT;
-    double flight_time = sqrt(2.0 * height / GRAVITY);
-    double predicted_x = TABLE_LENGTH + velocity_x * flight_time; // Predict the x value based on the velocity and flight time
-    double predicted_y = predictor.predict(predicted_x);
-
-    double height_ground = (TABLE_WIDTH / 2 + predicted_edge_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right;
-    double flight_time_ground = sqrt(2.0 * height_ground / GRAVITY);
-    double predicted_ground_x = TABLE_LENGTH + velocity_x * flight_time_ground; // Predict the x value based on the velocity and flight time to ground
-    double predicted_ground_y = predictor.predict(predicted_ground_x);
-
     if (config.if_adjacent_learning)
     {
         outfile << 0 << "," << TABLE_LENGTH << "," << predicted_edge_y << std::endl;
-        outfile << 0 << "," << predicted_x << "," << predicted_y << std::endl;
-        outfile << 0 << "," << predicted_ground_x << "," << predicted_ground_y << std::endl;
     }
 
-    double offset_y = target.y - predicted_y;
-    double offset_x = target.x - predicted_x;
+    logger(Info, "Landing position: (", landing_position.x, ", ", landing_position.y, ").");
+    outfile << 0 << "," << landing_position.x << "," << landing_position.y << std::endl;
+
+    double offset_y = target.y - landing_position.y;
+    double offset_x = target.x - landing_position.x;
+    double add_score = calculate_score(landing_position);
+    score += add_score;
+
+    logger(Info, "Add score: ", add_score, ". Now is ", score, ".");
+
+    logger(Info, "Offset y: ", offset_y, "; offset x: ", offset_x);
+
+    // if not valid offset, close file and return
+    if (!is_valid_offset(full_track) || full_track.back().x < 250) {
+        logger(Info, "Invalid bounce detected. Offset will not be added.");
+        outfile.close();
+        if (config.if_record_trajectory) logger(Info, "Close file.");
+        return;
+    }
 
     if (hitting_position.y > 0) {
         learning_left.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
     }
     else {
         learning_right.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
-    }
-
-    if (config.if_adjacent_learning)
-    {
-        logger(Info, "Predicted point: (", predicted_x, ", ", predicted_y, "). Offset: (", offset_x, ", ", offset_y, "). ", "Offset added for adjacent learning.");
     }
 
     outfile.close();  // close the file
@@ -418,8 +524,6 @@ double define_fake_motor_speed(double ball_x, double ball_y, double target_x, do
 
     double speed = flight_distance / flight_time;
     double motor_speed = speed * config.velocity_factor;
-
-    logger(Info, "Motor speed: ", motor_speed);
 
     return motor_speed;
 }
@@ -899,7 +1003,7 @@ void joint_hit(int hitting_distance, int preparing_distance, double ball_x, doub
 
 void get_correction_data()
 {
-    ifstream angle_file(string(config.repo_path) + "\\national\\static\\data_StaticAngle.csv");
+    ifstream angle_file(string(config.repo_path) + "\\national\\static\\data_AngleCorrection.csv");
 
     string line;
     getline(angle_file, line); // Skip the header line
@@ -962,6 +1066,10 @@ int main()
         std::thread referee_thread(get_referee);
         referee_thread.detach();
         logger(Info, "Referee system connected.");
+
+        std::thread t(getBallLoc);
+        t.detach();
+        logger(Info, "Sandbox system connected.");
     }
 
     demo.login_in(config.jaka_ip);
@@ -1066,6 +1174,8 @@ int main()
 
         logger(Info, "Round ", hit_round, " completed.");
         hit_round++;
+
+        while (cmd == 'k');
     }
     return 0;
 }
@@ -1199,6 +1309,22 @@ void get_referee()
             if (packet.has_yellow())
             {
                 Referee_TeamInfo team = packet.yellow();
+            }
+        }
+    }
+    return;
+}
+
+void getBallLoc()
+{
+    RoboCupSSLClient client(10005, "224.5.23.3", "");
+    client.open(true); // 打开客户端连接
+    ppBallPos packet;
+    while (true) {
+        if (client.receive(packet)) {
+            if (packet.has_x() && packet.has_y()) { // 
+                landing_position.x = packet.x() + 2740;
+                landing_position.y = packet.y();
             }
         }
     }
