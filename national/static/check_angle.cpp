@@ -11,9 +11,9 @@
 #include "endMotor/MotorIK.h"
 #include <windows.h>
 #include <time.h>
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/jkerr.h"
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/jktypes.h"
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/jkerr.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/jktypes.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
 #include <chrono>
 
 #include <thread>
