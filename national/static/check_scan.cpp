@@ -156,7 +156,7 @@ double calculate_hitting_angle(double ball_x, double ball_y, double posi_x, doub
 
     logger(Info, "Calculated angle: ", angle_deg, " degrees.");
 
-    return angle_deg;
+    return 0;
 }
 
 void scanWorkspace() {
@@ -191,7 +191,7 @@ void scanWorkspace() {
 
         for (double y = y_max; y > 0; y -= config.y_step) {
             if (found_outer_success) break;
-            double hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[5]), std::get<1>(targets[5]));
+            hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[5]), std::get<1>(targets[5]));
             pos.tran.x = x;
             pos.tran.y = y;
             pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
@@ -206,10 +206,13 @@ void scanWorkspace() {
                 pos.rpy.rz = 0;
             }
 
+            logger(Info, "Moving to (", pos.tran.x, ", ", pos.tran.y, ") with hitting angle ", hitting_angle, " degrees.");
+
 
             JointValue jvalHome;
             try {
                 demo.kine_inverse(&jval, &pos, &jvalHome);
+                logger(Info, jvalHome.jVal[0] * Rad2Deg, ", ", jvalHome.jVal[1] * Rad2Deg, ", ", jvalHome.jVal[2] * Rad2Deg, ", ", jvalHome.jVal[3] * Rad2Deg, ", ", jvalHome.jVal[4] * Rad2Deg, ", ", jvalHome.jVal[5] * Rad2Deg);
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
@@ -221,6 +224,8 @@ void scanWorkspace() {
             }
 
             demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
+
             mkmotor.goToPos2(180, 1, false);
 
             char response;
@@ -247,8 +252,7 @@ void scanWorkspace() {
 
         for (double y = 0; y > (-1) * y_max; y -= config.y_step) {
             if (found_inner_success) break;
-            double hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[4]), std::get<1>(targets[4]));
-            CartesianPose pos;
+            hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[4]), std::get<1>(targets[4]));
             pos.tran.x = x;
             pos.tran.y = y;
             pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
@@ -264,9 +268,12 @@ void scanWorkspace() {
                 pos.rpy.rz = 0;
             }
 
+            logger(Info, "Moving to (", pos.tran.x, ", ", pos.tran.y, ") with hitting angle ", hitting_angle, " degrees.");
+
             JointValue jvalHome;
             try {
                 demo.kine_inverse(&jval, &pos, &jvalHome);
+                logger(Info, jvalHome.jVal[0] * Rad2Deg, ", ", jvalHome.jVal[1] * Rad2Deg, ", ", jvalHome.jVal[2] * Rad2Deg, ", ", jvalHome.jVal[3] * Rad2Deg, ", ", jvalHome.jVal[4] * Rad2Deg, ", ", jvalHome.jVal[5] * Rad2Deg);
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
@@ -277,6 +284,7 @@ void scanWorkspace() {
                 continue;
             }
 
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
             demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
 
             char response;
@@ -304,8 +312,7 @@ void scanWorkspace() {
 
         for (double y = 0; y < y_max; y += config.y_step) {
             if (found_inner_success) break;
-            double hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[5]), std::get<1>(targets[5]));
-            CartesianPose pos;
+            hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[5]), std::get<1>(targets[5]));
             pos.tran.x = x;
             pos.tran.y = y;
             pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
@@ -319,9 +326,12 @@ void scanWorkspace() {
                 pos.rpy.ry = 90 * Deg2Rad;
                 pos.rpy.rz = 0;
             }
+
+            logger(Info, "Moving to (", pos.tran.x, ", ", pos.tran.y, ") with hitting angle ", hitting_angle, " degrees.");
             JointValue jvalHome;
             try {
                 demo.kine_inverse(&jval, &pos, &jvalHome);
+                logger(Info, jvalHome.jVal[0] * Rad2Deg, ", ", jvalHome.jVal[1] * Rad2Deg, ", ", jvalHome.jVal[2] * Rad2Deg, ", ", jvalHome.jVal[3] * Rad2Deg, ", ", jvalHome.jVal[4] * Rad2Deg, ", ", jvalHome.jVal[5] * Rad2Deg);
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
@@ -332,6 +342,7 @@ void scanWorkspace() {
                 continue;
             }
 
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
             demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
             mkmotor.goToPos2(180, 1, false);
 
@@ -360,8 +371,7 @@ void scanWorkspace() {
 
         for (double y = (-1) * y_max; y < 0; y += config.y_step) {
             if (found_outer_success) break;
-            double hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[4]), std::get<1>(targets[4]));
-            CartesianPose pos;
+            hitting_angle = calculate_hitting_angle(x, y, std::get<0>(targets[4]), std::get<1>(targets[4]));
             pos.tran.x = x;
             pos.tran.y = y;
             pos.tran.z = (y > 0) ? config.paddle_z_left : config.paddle_z_right;
@@ -376,11 +386,14 @@ void scanWorkspace() {
                 pos.rpy.rz = 0;
             }
 
+            logger(Info, "Moving to (", pos.tran.x, ", ", pos.tran.y, ") with hitting angle ", hitting_angle, " degrees.");
+
 
 
             JointValue jvalHome;
             try {
                 demo.kine_inverse(&jval, &pos, &jvalHome);
+                logger(Info, jvalHome.jVal[0] * Rad2Deg, ", ", jvalHome.jVal[1] * Rad2Deg, ", ", jvalHome.jVal[2] * Rad2Deg, ", ", jvalHome.jVal[3] * Rad2Deg, ", ", jvalHome.jVal[4] * Rad2Deg, ", ", jvalHome.jVal[5] * Rad2Deg);
             }
             catch (const std::runtime_error& e) {
                 logger(Error, "IK failed at (", x, ",", y, ")");
@@ -391,6 +404,7 @@ void scanWorkspace() {
                 continue;
             }
 
+            demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
             demo.joint_move(&jvalHome, MoveMode::ABS, false, config.speed);
             mkmotor.goToPos2(0, 1, false);
 

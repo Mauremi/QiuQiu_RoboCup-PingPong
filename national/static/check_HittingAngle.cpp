@@ -11,9 +11,9 @@
 #include "endMotor/MotorIK.h"
 #include <windows.h>
 #include <time.h>
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/jkerr.h"
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/jktypes.h"
-#include "SDK2.1.7/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/jkerr.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/jktypes.h"
+#include "2.2.7_fix_movel_acc_win/Windows/c&c++/inc_of_c++/JAKAZuRobot.h"
 #include <chrono>
 
 #include <thread>
@@ -78,9 +78,9 @@ std::map<int, std::pair<double, double>> buckets = {
     {1, {TABLE_LENGTH + 280,  560}},
     {2, {TABLE_LENGTH + 280,  0}},
     {3, {TABLE_LENGTH + 280, -560}},
-    {4, {TABLE_LENGTH + 540,  250}},
-    {5, {TABLE_LENGTH + 540, -250}},
-    {6, {TABLE_LENGTH + 780,  0}}
+    {4, {TABLE_LENGTH + 640,  250}},
+    {5, {TABLE_LENGTH + 640, -250}},
+    {6, {TABLE_LENGTH + 880,  0}}
 };
 // No, x, y, score
 
@@ -96,7 +96,7 @@ struct Config {
     const double velocity_factor = 39.5; // velocity shift factor 35.5 for second targets
 
     // Paddle location
-    const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 250, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_distance = 40; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double jaka_offset_x = 0, jaka_offset_y = 0; // offset for jaka mini, used to adjust the paddle position
 
@@ -123,6 +123,7 @@ struct Point
 };
 
 Point ball_position;         // location of the ball
+Point landing_position;
 int balls_n;
 Point hitting_position;
 Point target;
@@ -136,6 +137,7 @@ MotorIK mkmotor;
 
 void get_vision();      // vision thread function
 void get_referee();
+void getBallLoc();
 
 
 class LinearPredictor
@@ -281,11 +283,15 @@ void record_trajectory() {
         return;
     }
 
-    LinearPredictor predictor(track); // Create a linear predictor based on the recorded trajectory
+    Sleep(2000);
+    if (landing_position.x == 0) {
+        logger(Error, "No landing position recorded.");
+        outfile.close();  // close the file
+        if (config.if_record_trajectory) logger(Info, "Close file.");
+        return;
+    }
 
-    double predicted_y = predictor.predict(buckets[4].first); // Predict the y value for the current x position
-
-    double offset_angle = calculate_hitting_angle(hitting_position.x, hitting_position.y, buckets[4].first, predicted_y) - hitting_angle;
+    double offset_angle = calculate_hitting_angle(hitting_position.x, hitting_position.y, landing_position.x, landing_position.y) - hitting_angle;
     logger(Info, "Offset angle:", offset_angle);
 
     logger(Hint, "Is the angle correct? If yes, enter 'y' to confirm, else enter 'n' to discard this record.");
@@ -375,6 +381,10 @@ int main()
         std::thread t2(get_referee);
         t2.detach();
         logger(Info, "Referee system connected.");
+
+        std::thread t3(getBallLoc);
+        t3.detach();
+        logger(Info, "Sandbox system connected.");
     }
 
     demo.login_in(config.jaka_ip);
@@ -418,6 +428,8 @@ int main()
         }
 
         if (cmd != 'k') continue;
+
+        landing_position = Point{ 0,0,0,0,0 };
 
         logger(Info, "Paddle moving.");
 
@@ -499,6 +511,8 @@ int main()
 
         logger(Info, "Round ", hit_round, " completed.");
         hit_round++;
+
+        while (cmd == 'k') {}
     }
     return 0;
 }
@@ -632,6 +646,22 @@ void get_referee()
             if (packet.has_yellow())
             {
                 Referee_TeamInfo team = packet.yellow();
+            }
+        }
+    }
+    return;
+}
+
+void getBallLoc()
+{
+    RoboCupSSLClient client(10005, "224.5.23.3", "");
+    client.open(true); // 打开客户端连接
+    ppBallPos packet;
+    while (true) {
+        if (client.receive(packet)) {
+            if (packet.has_x() && packet.has_y()) { // 
+                landing_position.x = packet.x() + 2740;
+                landing_position.y = packet.y();
             }
         }
     }

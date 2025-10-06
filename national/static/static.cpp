@@ -812,6 +812,8 @@ int main()
 
         if (cmd != 'k') continue;
 
+        mkmotor.start();
+
         logger(Info, "Round ", hit_round, ".");
 
         logger(Info, "Begin hitting.");
