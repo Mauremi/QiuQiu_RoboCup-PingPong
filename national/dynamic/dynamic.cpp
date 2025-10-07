@@ -109,7 +109,9 @@ struct Config {
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
     const double projectile_coefficient = 0.6;
-    const double velocity_factor = 0.93;
+    const double velocity_factor = 0.81;
+    const double tangent_factor = 12.0 / 7.0;
+    const double parameter_e = 0.55;
 
     // paddle position
     const double paddle_z_left = 250, paddle_z_right = 240; // Paddle heights for left and right sides
@@ -532,9 +534,11 @@ void record_trajectory_after() {
 
     Sleep(3000);
 
-    logger(Info, "Landing position: (", landing_position.x, ", ", landing_position.y, ")");
+    Point landing_position_ = landing_position;
 
-    double real_angle = calculate_angle(hitting_position.x, hitting_position.y, landing_position.x, landing_position.y);
+    logger(Info, "Landing position: (", landing_position_.x, ", ", landing_position_.y, ")");
+
+    double real_angle = calculate_angle(hitting_position.x, hitting_position.y, landing_position_.x, landing_position_.y);
     double wanted_angle = calculate_angle(hitting_position.x, hitting_position.y, target.x, target.y);
     double offset_angle = (wanted_angle - real_angle) * config.offset_angle_learning_rate;
     if (hitting_round <= 2)
@@ -559,7 +563,7 @@ void record_trajectory_after() {
         }
     }
 
-    double add_score = calculate_score(landing_position);
+    double add_score = calculate_score(landing_position_);
     score += add_score;
     logger(Info, "Score add: ", add_score, ", current score: ", score);
 
@@ -646,9 +650,9 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
 double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle) {
 
     double numerator = leaving_velocity * std::sin(leaving_angle * Deg2Rad)
-        + (5.0 / 7.0) * coming_velocity * std::sin(coming_angle * Deg2Rad);
+        + config.tangent_factor * coming_velocity * std::sin(coming_angle * Deg2Rad);
     double denominator = leaving_velocity * std::cos(leaving_angle * Deg2Rad)
-        + (5.0 / 7.0) * coming_velocity * std::cos(coming_angle * Deg2Rad);
+        + config.tangent_factor * coming_velocity * std::cos(coming_angle * Deg2Rad);
 
     double phi = std::atan2(numerator, denominator) * Rad2Deg;
     return phi;
@@ -833,7 +837,7 @@ void calculate_hit(int round)
     // hitting!
     while (ball_position.x >= config.hitting_threshold && cmd == 'k') {} // Wait for the ball to reach hitting position
     is_hitting = true;
-    double speed = calculate_hitting_velocity(coming_angle, coming_velocity, leaving_velocity, leaving_angle, 0.7);
+    double speed = calculate_hitting_velocity(coming_angle, coming_velocity, leaving_velocity, leaving_angle, config.parameter_e);
     mkmotor.goToPos2(go_to_left ? -270 : 90, 1, speed, false);
     logger(Info, "Calculated motor speed: ", speed);
     logger(Info, "Motor will hit when ball.x is ", ball_position.x);
