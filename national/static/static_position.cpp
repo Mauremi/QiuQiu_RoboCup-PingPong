@@ -93,7 +93,7 @@ struct Config {
 
     // speed
     const double velocity_factor = 32.5; // velocity shift factor 35.5 for second targets
-    const int jaka_speed = 0;
+    const double jaka_speed = 150;
     const int jaka_acceleration = 4000;
 
     // Motor speed 
@@ -286,7 +286,12 @@ bool if_reach(double ball_x, double ball_y, JointValue& jvalH, Point& target) {
     double joint3 = jvalH.jVal[3] * 180 / pi222;
     double joint4 = jvalH.jVal[4] * 180 / pi222;
     double joint5 = jvalH.jVal[5] * 180 / pi222;
-
+    logger(Info, joint0);
+    logger(Info, joint1);
+    logger(Info, joint2);
+    logger(Info, joint3);
+    logger(Info, joint4);
+    logger(Info, joint5);
     if (joint0 == 0 && joint1 == 0 && joint2 == 0 && joint3 == 0 && joint4 == 0 && joint5 == 0)
     {
         logger(Error, "This position can't reach! try to hit target 2!");
@@ -334,7 +339,7 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
     target = { Point{ targets[2].first, targets[2].second, 0, 0, 0 } };
     CartesianPose pos;
     pos.tran.x = ball_x - 20;
-    pos.tran.y = ball_y - 80;
+    pos.tran.y = ball_y > 0 ? ball_y - 80 : ball_y + 80;
     pos.tran.z = 105;
     pos.rpy.rx = 180 * Deg2Rad;
     pos.rpy.ry = 0 * Deg2Rad;
@@ -347,21 +352,22 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
 
     bool can_reach = if_reach(ball_x, ball_y, jvalH, target);
 
-    if (!can_reach)
-    {
-        pos.tran.y = ball_y + 80;
-        try {
-            demo.kine_inverse(&jval, &pos, &jvalH);
-        }
-        catch (std::runtime_error) { logger(Error, "Strange position is error!"); }
+    /*if (!can_reach)
+         {
+             pos.tran.y = ball_y + 80;
+             try {
+                 demo.kine_inverse(&jval, &pos, &jvalH);
+             }
+             catch (std::runtime_error) { logger(Error, "Strange position is error!"); }
 
-        if (!if_reach(ball_x, ball_y, jvalH, target))
-        {
-            logger(Error, "Strange position can't reach! Give up this ball!");
-            return;
-        }
-    }
+             if (!if_reach(ball_x, ball_y, jvalH, target))
+             {
+                 logger(Error, "Strange position can't reach! Give up this ball!");
+                 return;
+             }
+         }
 
+     */
     JointValue jval_temp;
     jval_temp.jVal[0] = jval_temp.jVal[1] = jval_temp.jVal[2] = jval_temp.jVal[4] = jval_temp.jVal[5] = 0 * Deg2Rad;
     jval_temp.jVal[3] = 180 * Deg2Rad;
@@ -371,7 +377,7 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
     demo.joint_move(&jval_temp, ABS, true, 2);
     demo.joint_move(&jvalH, MoveMode::ABS, true, 1);
 
-    /*
+
     JointValue jvalH_hitting;
 
     jvalH_hitting.jVal[0] = jvalH.jVal[0];
@@ -383,12 +389,12 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
 
     Sleep(500);
 
-    demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180);
+    demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180.0);
 
     Sleep(500);
-    */
 
-    mkmotor.goToPos2(can_reach ? -80 : 80, can_reach ? 1 : 0, 600, false);
+
+    mkmotor.goToPos2(ball_y > 0 ? -80 : -300, ball_y > 0 ? 0 : 1, 730, false);
 }
 
 
