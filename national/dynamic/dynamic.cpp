@@ -92,7 +92,7 @@ std::map<int, std::pair<double, double>> targets = {
     {3, {TABLE_LENGTH + 280, -560}},
     {4, {TABLE_LENGTH + 640,  250}},
     {5, {TABLE_LENGTH + 640, -250}},
-    {6, {TABLE_LENGTH + 780,  0}}
+    {6, {TABLE_LENGTH + 880,  0}}
 };
 // No, x, y, score
 
@@ -104,15 +104,12 @@ struct Config {
     bool if_referee;
     const int velocity_calculating_method = 2;//or 2
 
-    const int goal_choice = 2;
-
     // motor speed
     int speed = 740; // Maximum speed for the motor
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
     const double projectile_coefficient = 0.6;
-    const double velocity_factor = 0.9;
-
+    const double velocity_factor = 0.93;
 
     // paddle position
     const double paddle_z_left = 250, paddle_z_right = 240; // Paddle heights for left and right sides
@@ -124,15 +121,12 @@ struct Config {
 
     // trajectory prediction
     const double linear_weight_quadratic = 0.5; // Weight for linear prediction in trajectory prediction
+    const double offset_angle_learning_rate = 0.5;
 
     // IFs
     const bool if_record_trajectory = true; // If record trajectory
     const bool if_vision_correction = false;
     const int if_difficult_velocity = 2;
-
-    // Equation
-    const double parameter_e_left = 0.74, parameter_e_right = 0.76;
-    const double velocity_y_parameter = 5 / 7.0; // Coefficient for velocity_y in the equation
 } config;
 
 double coming_angle;
@@ -149,10 +143,12 @@ struct Point
 
 Point ball_position;
 Point landing_position;
+Point target;
+Point hitting_position;
 int balls_n;
 std::mutex mtx;
 std::ofstream trajectory_outfile;
-int hitting_round = 1;
+int hitting_round = 0;
 char cmd = 'H';
 double hitting_angle = -10;
 JointValue jval, jvalH, inijval;
@@ -288,6 +284,19 @@ uint64_t get_current_time_microseconds()
     return microseconds;
 }
 
+double calculate_angle(double ball_x, double ball_y, double posi_x, double posi_y)
+{
+    double run_x = posi_x - ball_x;
+    double run_y = posi_y - ball_y;
+
+    double angle_rad = atan2(run_y, run_x);
+    double angle_deg = angle_rad * Rad2Deg;
+
+    logger(Info, "Calculated leaving angle: ", angle_deg, " degrees.");
+
+    return angle_deg;
+}
+
 double calculate_leaving_angle(double ball_x, double ball_y, double posi_x, double posi_y)
 {
     double run_x = posi_x - ball_x;
@@ -361,7 +370,7 @@ bool is_ball_moving_toward_robot()
         return false;
     }
 
-    if (track[0].y > 0) come_from_left = true;
+    if (track[3].y > 0) come_from_left = true;
     else come_from_left = false;
 
     double directionSum = 0;
@@ -472,7 +481,7 @@ void record_trajectory_after() {
 
         // Check if the ball is detected
         if (balls_n == 0) {
-            Sleep(400);
+            Sleep(1000);
 
             if (balls_n == 0)
             {
@@ -518,13 +527,37 @@ void record_trajectory_after() {
 
     double predicted_y = predictor.predict(TABLE_LENGTH); // Predict the y value for the current x position
     double offset_y = (predicted_y > 0) ? 725 : -725;
-    offset_y -= predicted_y; // Calculate the offset based on the predicted y value
 
     trajectory_outfile << 0 << "," << TABLE_LENGTH << "," << predicted_y << std::endl;
 
-    Sleep(2000);
+    Sleep(3000);
 
     logger(Info, "Landing position: (", landing_position.x, ", ", landing_position.y, ")");
+
+    double real_angle = calculate_angle(hitting_position.x, hitting_position.y, landing_position.x, landing_position.y);
+    double wanted_angle = calculate_angle(hitting_position.x, hitting_position.y, target.x, target.y);
+    double offset_angle = (wanted_angle - real_angle) * config.offset_angle_learning_rate;
+    if (hitting_round <= 2)
+    {
+        if (hitting_position.y > 0)
+        {
+            logger(Info, "Left offset angle added ", -offset_angle, " degrees, now is ", config.jaka_angle_left, " degrees.");
+            logger(Hint, "Agree? (y/n)");
+            char ch;
+            cin >> ch;
+            if (ch == 'y')
+                config.jaka_angle_left -= offset_angle;
+        }
+        else
+        {
+            logger(Info, "Right offset angle added ", -offset_angle, " degrees, now is ", config.jaka_angle_right, " degrees.");
+            logger(Hint, "Agree? (y/n)");
+            char ch;
+            cin >> ch;
+            if (ch == 'y')
+                config.jaka_angle_right -= offset_angle;
+        }
+    }
 
     double add_score = calculate_score(landing_position);
     score += add_score;
@@ -692,6 +725,7 @@ void trajectory_prediction()
         logger(Info, "Predicted y when x = 200 mm: ", y_predicted, " mm.");
 
         go_to_left = (y_predicted > 0); // Determine if the paddle should go to the left or right based on the predicted y value
+        hitting_position = { x, y_predicted, 0 };
 
         JointValue temp;
 
@@ -702,6 +736,7 @@ void trajectory_prediction()
 
         int target_index = come_from_left ? 4 : 5; // !!! ??
         logger(Info, "Choose goal ", target_index, ".");
+        target = { targets[target_index].first, targets[target_index].second, 0 };
 
         leaving_velocity = calculate_leaving_velocity(config.if_difficult_velocity, x, y_predicted, targets[target_index].first, targets[target_index].second);
         leaving_angle = calculate_leaving_angle(x, y_predicted, targets[target_index].first, targets[target_index].second);
@@ -909,10 +944,11 @@ int main()
 
     while (cmd != 'e') {
         if (cmd != 'k') continue;
+        hitting_round++;
 
+        logger(Info, "Round ", hitting_round);
         while (!is_ball_moving_toward_robot()) {}
         calculate_hit(hitting_round);
-        hitting_round++;
 
         Sleep(1000); // Wait for a while before the next hit
         logger(Move, "Jaka mini and motor returning.");

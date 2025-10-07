@@ -93,7 +93,7 @@ struct Config {
 
     // speed
     const double velocity_factor = 32.5; // velocity shift factor 35.5 for second targets
-    const int jaka_speed = 150;
+    const int jaka_speed = 0;
     const int jaka_acceleration = 4000;
 
     // Motor speed 
@@ -105,7 +105,7 @@ struct Config {
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double paddle_ball_center_preparing_distance = 60;
 
-    const double yuzhi = 0.8;
+    const double joint_threshold = 1.0;
 
     // Settings (IFs)
     const bool if_record_trajectory = true; // if record trajectory
@@ -286,51 +286,46 @@ bool if_reach(double ball_x, double ball_y, JointValue& jvalH, Point& target) {
     double joint3 = jvalH.jVal[3] * 180 / pi222;
     double joint4 = jvalH.jVal[4] * 180 / pi222;
     double joint5 = jvalH.jVal[5] * 180 / pi222;
-    //logger(Info, joint0);
-   // logger(Info, joint1);
-   // logger(Info, joint2);
-   // logger(Info, joint3);
-   // logger(Info, joint4);
-   // logger(Info, joint5);
+
     if (joint0 == 0 && joint1 == 0 && joint2 == 0 && joint3 == 0 && joint4 == 0 && joint5 == 0)
     {
         logger(Error, "This position can't reach! try to hit target 2!");
         return false;
     }
 
-    if (-360 * config.yuzhi > joint0 || joint0 > 360 * config.yuzhi)
+    if (-360 * config.joint_threshold > joint0 || joint0 > 360 * config.joint_threshold)
     {
-        logger(Error, "This position can't reach! try to hit target 2!");
+        logger(Error, "Joint 1 can't reach! try to hit target 2!");
         return false;
     }
-    else if (-125 * config.yuzhi > joint1 || joint1 > 125 * config.yuzhi)
+    else if (-125 * config.joint_threshold > joint1 || joint1 > 125 * config.joint_threshold)
     {
-        logger(Error, "This position can't reach! try to hit target 2!");
+        logger(Error, "Joint 2 can't reach! try to hit target 2!");
         return false;
     }
-    else if (-130 * config.yuzhi > joint2 || joint2 > 130 * config.yuzhi)
+    else if (-130 * config.joint_threshold > joint2 || joint2 > 130 * config.joint_threshold)
     {
-        logger(Error, "This position can't reach! try to hit target 2!");
+        logger(Error, "Joint 3 can't reach! try to hit target 2!");
         return false;
     }
-    else if (-360 * config.yuzhi > joint3 || joint3 > 360 * config.yuzhi)
+    else if (-360 * config.joint_threshold > joint3 || joint3 > 360 * config.joint_threshold)
     {
-        logger(Error, "This position can't reach! try to hit target 2!");
+        logger(Error, "Joint 4 can't reach! try to hit target 2!");
         return false;
     }
-    else if (-120 * config.yuzhi > joint4 || joint4 > 120 * config.yuzhi)
+    else if (-120 * config.joint_threshold > joint4 || joint4 > 120 * config.joint_threshold)
     {
-        logger(Error, "This position can't reach! try to hit target 2!");
+        logger(Error, "Joint 5 can't reach! try to hit target 2!");
         return false;
     }
-    else if (-360 * config.yuzhi > joint5 || joint5 > 360 * config.yuzhi)
+    else if (-360 * config.joint_threshold > joint5 || joint5 > 360 * config.joint_threshold)
     {
-        logger(Error, "This position can't reach! try to hit target 2!");
+        logger(Error, "Joint 6 can't reach! try to hit target 2!");
         return false;
     }
     else {
 
-        return false;
+        return true;
     }
 }
 
@@ -338,18 +333,62 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
 {
     target = { Point{ targets[2].first, targets[2].second, 0, 0, 0 } };
     CartesianPose pos;
-    pos.tran.x = ball_x;
-    pos.tran.y = ball_y - 165;
-    pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
-    pos.rpy.rx = 180;
-    pos.rpy.ry = 0;
-    pos.rpy.rz = 90;
+    pos.tran.x = ball_x - 20;
+    pos.tran.y = ball_y - 80;
+    pos.tran.z = 105;
+    pos.rpy.rx = 180 * Deg2Rad;
+    pos.rpy.ry = 0 * Deg2Rad;
+    pos.rpy.rz = 0 * Deg2Rad;
+
     try {
         demo.kine_inverse(&jval, &pos, &jvalH);
     }
-    catch (std::runtime_error) { logger(Error, "strange pisition is error!"); }
+    catch (std::runtime_error) { logger(Error, "Strange position is error!"); }
 
     bool can_reach = if_reach(ball_x, ball_y, jvalH, target);
+
+    if (!can_reach)
+    {
+        pos.tran.y = ball_y + 80;
+        try {
+            demo.kine_inverse(&jval, &pos, &jvalH);
+        }
+        catch (std::runtime_error) { logger(Error, "Strange position is error!"); }
+
+        if (!if_reach(ball_x, ball_y, jvalH, target))
+        {
+            logger(Error, "Strange position can't reach! Give up this ball!");
+            return;
+        }
+    }
+
+    JointValue jval_temp;
+    jval_temp.jVal[0] = jval_temp.jVal[1] = jval_temp.jVal[2] = jval_temp.jVal[4] = jval_temp.jVal[5] = 0 * Deg2Rad;
+    jval_temp.jVal[3] = 180 * Deg2Rad;
+
+    mkmotor.goToPos2(-180, 1, 180, false);
+
+    demo.joint_move(&jval_temp, ABS, true, 2);
+    demo.joint_move(&jvalH, MoveMode::ABS, true, 1);
+
+    /*
+    JointValue jvalH_hitting;
+
+    jvalH_hitting.jVal[0] = jvalH.jVal[0];
+    jvalH_hitting.jVal[1] = jvalH.jVal[1];
+    jvalH_hitting.jVal[2] = jvalH.jVal[2];
+    jvalH_hitting.jVal[3] = jvalH.jVal[3];
+    jvalH_hitting.jVal[4] = jvalH.jVal[4];
+    jvalH_hitting.jVal[5] = jvalH.jVal[5] + 100.0 * pi222 / 180.0;
+
+    Sleep(500);
+
+    demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180);
+
+    Sleep(500);
+    */
+
+    mkmotor.goToPos2(can_reach ? -80 : 80, can_reach ? 1 : 0, 600, false);
 }
 
 
@@ -549,6 +588,8 @@ void record_trajectory() {
     {
         outfile << 0 << "," << TABLE_LENGTH << "," << predicted_edge_y << std::endl;
     }
+
+    Sleep(3000);
 
     logger(Info, "Landing position: (", landing_position.x, ", ", landing_position.y, ").");
     outfile << 0 << "," << landing_position.x << "," << landing_position.y << std::endl;
@@ -1030,10 +1071,11 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
 
     bool can_reach = if_reach(ball_x, ball_y, jvalH, target);
     if (!can_reach) {
-        logger(Info, "This pisition can't reach! Try to use strange pisition.");
+        logger(Error, "This position can't reach! Try to use strange position.");
         strange_position(ball_x, ball_y, jvalH, target);
-    }
 
+        return;
+    }
 
     demo.joint_move(&jvalH, MoveMode::ABS, true, 1);
 
@@ -1048,7 +1090,7 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
 
     Sleep(500);
 
-    demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180);
+    //demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180);
 
     Sleep(500);
     mkmotor.goToPos2((ball_y > 0) ? -270 : 90, 0, motor_speed, false); // !DIRECTION

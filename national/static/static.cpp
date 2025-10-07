@@ -80,7 +80,7 @@ std::map<int, std::pair<double, double>> targets = {
     {3, {TABLE_LENGTH + 280, -560}},
     {4, {TABLE_LENGTH + 640,  250}},
     {5, {TABLE_LENGTH + 640, -250}},
-    {6, {TABLE_LENGTH + 780,  0}}
+    {6, {TABLE_LENGTH + 880,  0}}
 };
 // No, x, y, score
 
@@ -91,7 +91,7 @@ struct Config {
     char* repo_path;
     bool if_referee;
 
-    double yuzhi = 0.8;
+    double joint_threshold = 0.8;
 
     // Motor speed 
     const double table_height_left = 760, table_height_right = 760;  // table height (left and right). If table is not flat, set the height of the left and right side of the table.
@@ -603,29 +603,29 @@ bool if_reach(double ball_x, double ball_y, CartesianPose& pos, JointValue& jval
     if (joint0 == 0 && joint1 == 0 && joint2 == 0 && joint3 == 0 && joint4 == 0 && joint5 == 0)
         return false;
 
-    if (-360 * config.yuzhi > joint0 || joint0 > 360 * config.yuzhi)
+    if (-360 * config.joint_threshold > joint0 || joint0 > 360 * config.joint_threshold)
     {
 
         return false;
     }
-    else if (-125 * config.yuzhi > joint1 || joint1 > 125 * config.yuzhi)
+    else if (-125 * config.joint_threshold > joint1 || joint1 > 125 * config.joint_threshold)
     {
 
         return false;
     }
-    else if (-130 * config.yuzhi > joint2 || joint2 > 130 * config.yuzhi)
+    else if (-130 * config.joint_threshold > joint2 || joint2 > 130 * config.joint_threshold)
     {
         return false;
     }
-    else if (-360 * config.yuzhi > joint3 || joint3 > 360 * config.yuzhi)
+    else if (-360 * config.joint_threshold > joint3 || joint3 > 360 * config.joint_threshold)
     {
         return false;
     }
-    else if (-120 * config.yuzhi > joint4 || joint4 > 120 * config.yuzhi)
+    else if (-120 * config.joint_threshold > joint4 || joint4 > 120 * config.joint_threshold)
     {
         return false;
     }
-    else if (-360 * config.yuzhi > joint5 || joint5 > 360 * config.yuzhi)
+    else if (-360 * config.joint_threshold > joint5 || joint5 > 360 * config.joint_threshold)
     {
         return false;
     }
@@ -690,8 +690,8 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
     {
         for (adjust_round = 1; adjust_round <= 5; adjust_round++)  // 每次尝试 1mm
         {
-            pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(hitting_angle_rad) + adjust_length * adjust_length * cos(hitting_angle_rad);
-            pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(hitting_angle_rad) + adjust_length * adjust_length * sin(hitting_angle_rad);
+            pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(hitting_angle_rad) + adjust_length * adjust_round * cos(hitting_angle_rad);
+            pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(hitting_angle_rad) + adjust_length * adjust_round * sin(hitting_angle_rad);
             pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
             if (ball_y > 0) {
@@ -720,8 +720,8 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
             for (double adjust_round = 1; adjust_round <= 12; adjust_round++)
             {
 
-                pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(hitting_angle_rad);
-                pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(hitting_angle_rad) - adjust_length * adjust_round;
+                pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(hitting_angle_rad) + adjust_length * adjust_round * sin(hitting_angle_rad);
+                pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(hitting_angle_rad) - adjust_length * adjust_round * cos(hitting_angle_rad);
                 pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
                 if (ball_y > 0) {
@@ -747,7 +747,7 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
                 }
                 else
                 {
-                    logger(Info, "try once but error.");
+                    logger(Error, "try once but error.");
                 }
 
             }
@@ -788,7 +788,7 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
         for (adjust_round = 1; adjust_round <= 5; adjust_round++)
         {
             pos.tran.x = ball_x - config.paddle_ball_center_distance * cos(hitting_angle_rad) + adjust_round * adjust_length * cos(hitting_angle_rad);
-            pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(hitting_angle_rad) + adjust_round * sin(hitting_angle_rad);
+            pos.tran.y = ball_y - config.paddle_ball_center_distance * sin(hitting_angle_rad) + adjust_round * adjust_length * sin(hitting_angle_rad);
             pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
             if (ball_y > 0) {
@@ -865,7 +865,7 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
             if (can_hit) return true;
         }
     }
-    logger(Info, "adjust paddle error!");
+    logger(Error, "adjust paddle error!");
     return false;
 }
 
@@ -1062,9 +1062,8 @@ int main()
 
         if (!can_reach) {
             logger(Info, "This position can't reach. Try to adjust the paddle.");
-            adjust_paddle(ball_x, ball_y, pos, jval, jvalH, modified_target);
+            can = adjust_paddle(ball_x, ball_y, pos, jval, jvalH, modified_target);
         }
-
 
         logger(Move, "Jaka mini and motor preparing.");
         mkmotor.goToPos2(ini_angle, 1, 200, false);
