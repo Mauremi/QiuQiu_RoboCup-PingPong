@@ -225,7 +225,7 @@ struct Config {
 double coming_angle;
 double coming_velocity;
 double leaving_angle;
-double leaving_velocity;//ÎªÁË¼ÆËãËÙ¶È
+double leaving_velocity;//ä¸ºäº†è®¡ç®—é€Ÿåº¦
 
 struct Adjustment
 {
@@ -241,6 +241,7 @@ struct Adjustment
 Point ball_position;
 Point landing_position;
 Point target;
+int target_no;
 Point hitting_position;
 int balls_n;
 std::mutex mtx;
@@ -251,7 +252,7 @@ double hitting_angle = -10;
 JointValue jval, jvalH, inijval;
 double y_quadratic_predicted_;
 bool score[10] = { false };
-std::ofstream offset_file;  // ¸²¸Ç
+std::ofstream offset_file;  // è¦†ç›–
 int* order;
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
@@ -375,65 +376,68 @@ class AdjacentLearning
 {
     struct Offset
     {
-        Point center; // Center of the offset
+        int target;
         double y_offset;
         double x_offset;
     };
-    list<Offset> offsets_; // List of offsets for adjacent learning
+
+    std::array<Offset, 9> offsets;
+    std::unordered_map<int, std::vector<std::pair<int, double>>> neighbor_map_;
+
 public:
-    AdjacentLearning() = default;
+    AdjacentLearning() {
+        for (int i = 0; i < 9; ++i) {
+            offsets[i] = { i + 1, 0.0, 0.0 };
+        }
+
+        neighbor_map_ = {
+            {1, {{2, 0.75}, {3, 0.5}, {6, 0.5}, {7, 0.75}}},
+            {2, {{1, 0.75}, {3, 0.75}, {6, 0.5}, {7, 0.75}, {8, 0.5}}},
+            {3, {{1, 0.5}, {2, 0.75}, {4, 0.75}, {7, 0.5}, {8, 0.75}, {9, 0.5}}},
+            {4, {{3, 0.75}, {5, 0.75}, {8, 0.5}, {9, 0.75}}},
+            {5, {{4, 0.75}, {9, 0.5}}},
+            {6, {{1, 0.5}, {2, 0.5}, {7, 0.75}, {8, 0.5}}},
+            {7, {{1, 0.75}, {2, 0.75}, {3, 0.5}, {6, 0.75}, {8, 0.75}, {9, 0.5}}},
+            {8, {{2, 0.5}, {3, 0.75}, {4, 0.5}, {6, 0.5}, {7, 0.75}, {9, 0.75}}},
+            {9, {{3, 0.5}, {4, 0.75}, {5, 0.5}, {7, 0.5}, {8, 0.75}}}
+        };
+    }
     ~AdjacentLearning() = default;
 
-    // Add an offset for adjacent learning
-    void add_offset(const double x, const double y, const double y_offset, const double x_offset) {
-        const Offset offset{ {x, y, 0}, y_offset, x_offset };
-        offsets_.push_back(offset);
+    void add_offset(const int target, const double y_offset, const double x_offset) {
+        offsets[target - 1].y_offset += y_offset;
+        offsets[target - 1].x_offset += x_offset;
+
+        auto it = neighbor_map_.find(target);
+        if (it != neighbor_map_.end()) {
+            for (const auto& p : it->second) {
+                int neighbor = p.first;
+                double weight = p.second;
+                if (neighbor >= 1 && neighbor <= 9) {
+                    offsets[neighbor - 1].y_offset += y_offset * weight;
+                    offsets[neighbor - 1].x_offset += x_offset * weight;
+                }
+            }
+        }
+
         // write csv
         if (offset_file.is_open()) {
-            offset_file << x << ","
-                << y << ","
+            offset_file << target << ","
                 << x_offset << ","
                 << y_offset << ","
                 << "normal" << std::endl;
         }
     }
 
-    // Get the offset for a specific position
-    double get_offset_y(const double x, const double y) const {
-        double offset_sum = 0.0;
-        int index = 0;
-        for (const auto& offset : offsets_) {
-            index++;
-            switch (config.offset_class)
-            {
-            case 1:
-                offset_sum += config.correction_coefficient_y * offset.y_offset * exp(-sqrt(pow((x - offset.center.x) / config.deviser_x, 2) + pow((y - offset.center.y) / config.deviser_y, 2))); break;
-            case 2: default:
-                offset_sum += config.correction_coefficient_y * offset.y_offset * exp(-(pow((x - offset.center.x) / config.deviser_x, 2) - pow((y - offset.center.y) / config.deviser_y, 2))); break;
-            }
-        }
-        logger(Info, index, " offsets.");
-        return offset_sum;
+    double get_offset_y(const int target) const {
+        return offsets[target - 1].y_offset;
     }
 
-    //!!! to be implemented
-    double get_offset_x(const double x, const double y) const
-    {
-        double offset_sum = 0.0;
-        int index = 0;
-        for (const auto& offset : offsets_) {
-            index++;
-            switch (config.offset_class)
-            {
-            case 1:
-                offset_sum += config.correction_coefficient_x * offset.x_offset * exp(-sqrt(pow((x - offset.center.x) / config.deviser_x, 2) + pow((y - offset.center.y) / config.deviser_y, 2))); break;
-            case 2: default:
-                offset_sum += config.correction_coefficient_x * offset.x_offset * exp(-(pow((x - offset.center.x) / config.deviser_x, 2) - pow((y - offset.center.y) / config.deviser_y, 2))); break;
-            }
-        }
-        return offset_sum;
+    double get_offset_x(const int target) const {
+        return offsets[target - 1].x_offset;
     }
-} learning_left, learning_right;
+
+} learning;
 
 
 
@@ -524,7 +528,7 @@ bool is_valid_offset(std::vector<Point>& full_track) {
     double dot = vx1 * vx2 + vy1 * vy2;
     double norm1 = sqrt(vx1 * vx1 + vy1 * vy1);
     double norm2 = sqrt(vx2 * vx2 + vy2 * vy2);
-    if (norm1 < 1e-6 || norm2 < 1e-6) return true; // ÏòÁ¿¹ı¶Ì£¬ÎŞ·¨ÅĞ¶¨ => ÈÏÎªÓĞĞ§
+    if (norm1 < 1e-6 || norm2 < 1e-6) return true; // å‘é‡è¿‡çŸ­ï¼Œæ— æ³•åˆ¤å®š => è®¤ä¸ºæœ‰æ•ˆ
 
     double cos_theta = dot / (norm1 * norm2);
     if (cos_theta > 1.0) cos_theta = 1.0;
@@ -586,7 +590,7 @@ void record_trajectory_after() {
     while (true) {
         double ball_x, ball_y, time_stamp;
 
-        std::lock_guard<std::mutex> lock(mtx);  // Ê¹ÓÃ std::lock_guard ×Ô¶¯¹ÜÀíËø
+        std::lock_guard<std::mutex> lock(mtx);  // ä½¿ç”¨ std::lock_guard è‡ªåŠ¨ç®¡ç†é”
         ball_x = ball_position.x;
         ball_y = ball_position.y;
         time_stamp = ball_position.t;
@@ -661,12 +665,7 @@ void record_trajectory_after() {
         }
         else
         {
-            if (hitting_position.y > 0) {
-                learning_left.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
-            }
-            else {
-                learning_right.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
-            }
+        	learning.add_offset(target_no, offset_y, offset_x);
         }
     }
 
@@ -830,37 +829,37 @@ std::vector<Point> record_trajectory_before(int maxCount, uint64_t& timeStart, u
     return track;
 }
 
-// ¼ÆËãÂäµã¾àÀë
+// è®¡ç®—è½ç‚¹è·ç¦»
 double computeLandingDistance(double velocity) {
-    // ³õÊ¼Ìõ¼ş
+    // åˆå§‹æ¡ä»¶
     double x = 0.0;      // mm
-    double z = 0.0;      // mm£¨×À±ßÎª 0£¬ÏòÏÂÎªÕı£©
+    double z = 0.0;      // mmï¼ˆæ¡Œè¾¹ä¸º 0ï¼Œå‘ä¸‹ä¸ºæ­£ï¼‰
     double vx = velocity; // mm/s
     double vz = 0.0;      // mm/s
 
-    // ³£Á¿ÏµÊı
+    // å¸¸é‡ç³»æ•°
     double k = 0.5 * AIR_DENSITY * DRAG_COEFF * BALL_AREA;  // g/mm
 
     double H = TABLE_HEIGHT;
     double DT = 0.4;
 
-    // »ı·Öµü´ú
+    // ç§¯åˆ†è¿­ä»£
     while (z < H) {
-        // ËÙ¶È´óĞ¡
+        // é€Ÿåº¦å¤§å°
         double v = std::sqrt(vx * vx + vz * vz);
 
-        // ×èÁ¦¼ÓËÙ¶È
+        // é˜»åŠ›åŠ é€Ÿåº¦
         double ax = -(k / BALL_MASS) * v * vx;
         double az = GRAVITY - (k / BALL_MASS) * v * vz;
 
-        // Euler »ı·Ö
+        // Euler ç§¯åˆ†
         vx += ax * DT;
         vz += az * DT;
         x += vx * DT;
         z += vz * DT;
     }
 
-    return x; // ÂäµãË®Æ½¾àÀë
+    return x; // è½ç‚¹æ°´å¹³è·ç¦»
 }
 
 double computeVelocityFromDistance(double distance) {
@@ -878,7 +877,7 @@ double computeVelocityFromDistance(double distance) {
         }
     }
     return 0.5 * (low + high);
-}//¸¨Öú·½·¨¶ş¼ÆËãËÙ¶È¡£
+}//è¾…åŠ©æ–¹æ³•äºŒè®¡ç®—é€Ÿåº¦ã€‚
 
 double calculate_leaving_velocity(int velocity_calculating_method, double ball_x, double ball_y, double target_x, double target_y) {
     if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
@@ -898,13 +897,13 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
         double motor_speed = speed * config.velocity_factor_dynamic;
 
         return motor_speed * config.projectile_coefficient;
-    }//Æ½Å×¼ÆËã¾àÀë
+    }//å¹³æŠ›è®¡ç®—è·ç¦»
     if (velocity_calculating_method == 2) {
         double distance = flight_distance;
         double leaving_velocity = computeVelocityFromDistance(distance) * config.velocity_factor_dynamic;
 
         return leaving_velocity;
-    }//¿ÕÆø¶¯Á¦Ñ§¼ÆËã¾àÀë
+    }//ç©ºæ°”åŠ¨åŠ›å­¦è®¡ç®—è·ç¦»
 }
 
 double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle) {
@@ -916,7 +915,7 @@ double calculate_hitting_angle(double coming_angle, double coming_velocity, doub
 
     double phi = std::atan2(numerator, denominator) * Rad2Deg;
     return phi;
-}//¼ÆËã»÷Çò½Ç¶È
+}//è®¡ç®—å‡»çƒè§’åº¦
 
 double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e) {
 
@@ -927,8 +926,8 @@ double calculate_hitting_velocity(double coming_angle, double coming_velocity, d
 
     const double denominator = 1.0 + e;
 
-    return numerator / denominator; //·µ»Øvp
-}//¼ÆËã»÷ÇòËÙ¶È
+    return numerator / denominator; //è¿”å›vp
+}//è®¡ç®—å‡»çƒé€Ÿåº¦
 
 void record_full_trajectory()
 {
@@ -1206,7 +1205,7 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
 
 
     // To be completed: check inverse error.
-    //ÏÈ³¢ÊÔÑØ×ÅÒÆ¶¯·½ÏòÆ«ÒÆ£¬3cmºóÈÔÈ»error£¬ÔòÑØ×Å´¹Ö±ÒÆ¶¯·½ÏòÆ«ÒÆÖÁ¶à2cm
+    //å…ˆå°è¯•æ²¿ç€ç§»åŠ¨æ–¹å‘åç§»ï¼Œ3cmåä»ç„¶errorï¼Œåˆ™æ²¿ç€å‚ç›´ç§»åŠ¨æ–¹å‘åç§»è‡³å¤š2cm
 
     adjust.ball_distance = 0;
     adjust.prepare_distance = 0;
@@ -1216,13 +1215,13 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
 
 
 
-    if (ball_x < 100) //ÇòÔÚÏÂ±ßÔµ
+    if (ball_x < 100) //çƒåœ¨ä¸‹è¾¹ç¼˜
     {
         adjust.ball_distance_x_sign = 1;
         adjust.ball_distance_y_sign = 1;
         adjust.prepare_vertical_x_sign = ball_y > 0 ? -1 : 1;
         adjust.prepare_vertical_y_sign = ball_y > 0 ? 1 : -1;
-        //ÏÈÈ·¶¨ÖÕµãµÄÎ»ÖÃ
+        //å…ˆç¡®å®šç»ˆç‚¹çš„ä½ç½®
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
         {
@@ -1255,7 +1254,7 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         {
             logger(Error, "Can't find terminal position!"); return false;
         }
-        //È·¶¨×¼±¸¾àÀë
+        //ç¡®å®šå‡†å¤‡è·ç¦»
         for (; adjust.prepare_distance <= 30; adjust.prepare_distance += 5)
         {
             preparing_distance -= adjust.prepare_distance;
@@ -1310,13 +1309,13 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         }
         return false;
     }
-    if (ball_x >= 200) //ÇòÔÚÉÏ±ßÔµ
+    if (ball_x >= 200) //çƒåœ¨ä¸Šè¾¹ç¼˜
     {
         adjust.ball_distance_x_sign = -1;
         adjust.ball_distance_y_sign = -1;
         adjust.prepare_vertical_x_sign = ball_y > 0 ? 1 : -1;
         adjust.prepare_vertical_y_sign = ball_y > 0 ? -1 : 1;
-        //È·¶¨µ÷ÕûÖÕµã
+        //ç¡®å®šè°ƒæ•´ç»ˆç‚¹
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance = +1)
         {
@@ -1349,7 +1348,7 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         {
             logger(Error, "Can't find terminal position!"); return false;
         }
-        //È·¶¨×¼±¸¾àÀë
+        //ç¡®å®šå‡†å¤‡è·ç¦»
         for (; adjust.prepare_distance <= 20; adjust.prepare_distance += 5)
         {
 
@@ -1403,7 +1402,7 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         }
         return false;
     }
-    if (ball_y > 300) //ÇòÔÚ×ó±ßÔµ
+    if (ball_y > 300) //çƒåœ¨å·¦è¾¹ç¼˜
     {
         adjust.ball_distance_x_sign = 1;
         adjust.ball_distance_y_sign = -1;
@@ -1493,13 +1492,13 @@ bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& ad
         }
         return false;
     }
-    if (ball_y < -300) //ÇòÔÚÓÒ±ßÔµ
+    if (ball_y < -300) //çƒåœ¨å³è¾¹ç¼˜
     {
         adjust.ball_distance_x_sign = 1;
         adjust.ball_distance_y_sign = 1;
         adjust.prepare_vertical_x_sign = 1;
         adjust.prepare_vertical_y_sign = 1;
-        //È·¶¨ÖÕµãÎ»ÖÃ    
+        //ç¡®å®šç»ˆç‚¹ä½ç½®    
         bool can_terminal = false;
         for (; adjust.ball_distance <= 10; adjust.ball_distance += 1)
         {
@@ -1733,21 +1732,16 @@ void read_offsets()
     while (getline(offset_file, line))
     {
         stringstream ss(line);
-        double x, y, x_offset, y_offset;
+        double target_no, x_offset, y_offset;
         char point_type;
-        ss >> x;
-        ss.ignore(1, ',');
-        ss >> y;
+        ss >> target_no;
         ss.ignore(1, ',');
         ss >> x_offset;
         ss.ignore(1, ',');
         ss >> y_offset;
         ss.ignore(1, ',');
         ss >> point_type;
-        if (y >= 0)
-            learning_left.add_offset(x, y, y_offset, x_offset);
-        else
-            learning_right.add_offset(x, y, y_offset, x_offset);
+        learning.add_offset(target_no, y_offset, x_offset);
     }
 }
 
@@ -1763,6 +1757,7 @@ Point choose_target()
                 if (!score[order[i]])
                 {
                     logger(Info, "Choose target ", order[i], ".");
+                    target_no = order[i];
                     return { targets[order[i]].first, targets[order[i]].second - (config.is_left ? 0 : 760), 0 };
                 }
             }
@@ -1772,6 +1767,7 @@ Point choose_target()
                 if (!score[order[i]])
                 {
                     logger(Info, "Choose target ", order[i], ".");
+                    target_no = order[i];
                     double offset_x, offset_y;
                     switch (i)
                     {
@@ -1806,8 +1802,9 @@ Point choose_target()
                 int id = order[i];
                 if (!score[id]) {
                     logger(Info, "Choose target ", id, ".");
+                    target_no = id;
 
-                    // ¼ÆËã¶¯Ì¬Æ«ÒÆ
+                    // è®¡ç®—åŠ¨æ€åç§»
                     double dx = 0, dy = 0;
                     int count = 0;
                     for (int nb : neighbors[id]) {
@@ -1822,7 +1819,7 @@ Point choose_target()
                         dx /= count;
                         dy /= count;
                         double len = sqrt(dx * dx + dy * dy);
-                        if (len > 1e-6) { // ¹éÒ»»¯
+                        if (len > 1e-6) { // å½’ä¸€åŒ–
                             dx = dx / len * OFFSET_SCALE;
                             dy = dy / len * OFFSET_SCALE;
                         }
@@ -1831,7 +1828,7 @@ Point choose_target()
                     double target_x = targets[id].first + dx;
                     double target_y = targets[id].second + dy;
 
-                    // ·½Ïò¾µÏñ£¨ÈôÎª×ó³¡£©
+                    // æ–¹å‘é•œåƒï¼ˆè‹¥ä¸ºå·¦åœºï¼‰
                     if (!config.is_left)
                         target_y -= 760;
 
@@ -1857,8 +1854,9 @@ Point choose_target()
                     int id = order[i];
                     if (!score[id]) {
                         logger(Info, "Choose target ", id, ".");
+                        target_no = id;
 
-                        // ¼ÆËã¶¯Ì¬Æ«ÒÆ
+                        // è®¡ç®—åŠ¨æ€åç§»
                         double dx = 0, dy = 0;
                         int count = 0;
                         for (int nb : neighbors[id]) {
@@ -1873,7 +1871,7 @@ Point choose_target()
                             dx /= count;
                             dy /= count;
                             double len = sqrt(dx * dx + dy * dy);
-                            if (len > 1e-6) { // ¹éÒ»»¯
+                            if (len > 1e-6) { // å½’ä¸€åŒ–
                                 dx = dx / len * OFFSET_SCALE;
                                 dy = dy / len * OFFSET_SCALE;
                             }
@@ -1882,7 +1880,7 @@ Point choose_target()
                         double target_x = targets[id].first + dx;
                         double target_y = targets[id].second + dy;
 
-                        // ·½Ïò¾µÏñ£¨ÈôÎª×ó³¡£©
+                        // æ–¹å‘é•œåƒï¼ˆè‹¥ä¸ºå·¦åœºï¼‰
                         if (!config.is_left)
                             target_y -= 760;
 
@@ -1918,8 +1916,8 @@ void static_hit()
     logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
     target = choose_target();
-    double y_offset = ball_y > 0 ? learning_left.get_offset_y(ball_x, ball_y) : learning_right.get_offset_y(ball_x, ball_y);
-    double x_offset = ball_y > 0 ? learning_left.get_offset_x(ball_x, ball_y) : learning_right.get_offset_x(ball_x, ball_y);
+    double y_offset = learning.get_offset_y(target_no);
+    double x_offset = learning.get_offset_x(target_no);
     logger(Info, "Choose target: (", target.x, ", ", target.y, ").");
 
     Point modified_target = { target.x + x_offset, target.y + y_offset, 0 }; // Apply the offset to the target
@@ -2133,7 +2131,7 @@ void get_referee()
 {
     int round = 0;
     RoboCupSSLClient client(10003, "224.5.23.1", "");
-    client.open(true); // ´ò¿ª¿Í»§¶ËÁ¬½Ó
+    client.open(true); // æ‰“å¼€å®¢æˆ·ç«¯è¿æ¥
     Referee packet;
     byte datagram[20000];
     while (true)
@@ -2141,22 +2139,22 @@ void get_referee()
         if (client.receive(packet))
         {
             if (packet.has_command())
-            { // ¼ì²éÊÇ·ñÓĞÃüÁî
+            { // æ£€æŸ¥æ˜¯å¦æœ‰å‘½ä»¤
                 Referee_Command next_command = packet.command();
-                char cmd = translate_referee(next_command); // ½«ÃüÁî×ª»»Îª¿ØÖÆ×Ö·û
+                char cmd = translate_referee(next_command); // å°†å‘½ä»¤è½¬æ¢ä¸ºæ§åˆ¶å­—ç¬¦
                 // cout << cmd;
                 if (cmd == 'k' && packet.has_yellow())
                 {
-                    // std::cout << "comand is " << cmd; // Êä³öÃüÁî
+                    // std::cout << "comand is " << cmd; // è¾“å‡ºå‘½ä»¤
                     Referee_TeamInfo team = packet.yellow();
-                    // std::cout << "current hit num is " << team.timeouts(); //Êä³öµ±Ç°µÄ»÷´òÊı
+                    // std::cout << "current hit num is " << team.timeouts(); //è¾“å‡ºå½“å‰çš„å‡»æ‰“æ•°
                     round = team.timeouts();
                 }
                 if (cmd == 'K' && packet.has_blue())
                 {
-                    // std::cout << "comand is " << cmd; // Êä³öÃüÁî
+                    // std::cout << "comand is " << cmd; // è¾“å‡ºå‘½ä»¤
                     Referee_TeamInfo team = packet.blue();
-                    // std::cout << "current hit num is " << team.timeouts();//Êä³öµ±Ç°µÄ»÷´òÊı
+                    // std::cout << "current hit num is " << team.timeouts();//è¾“å‡ºå½“å‰çš„å‡»æ‰“æ•°
                 }
             }
             if (packet.has_yellow())
@@ -2171,7 +2169,7 @@ void get_referee()
 void getBallLoc()
 {
     RoboCupSSLClient client(10005, "224.5.23.3", "");
-    client.open(true); // ´ò¿ª¿Í»§¶ËÁ¬½Ó
+    client.open(true); // æ‰“å¼€å®¢æˆ·ç«¯è¿æ¥
     ppBallPos packet;
     while (true) {
         if (client.receive(packet)) {
