@@ -43,7 +43,7 @@ using std::chrono::milliseconds;
 #define TARGET_RADIUS 50
 #define OFFSET_SCALE (TARGET_RADIUS / 2.3)
 
-#define GRAVITY 9800.0
+#define GRAVITY (9800.0 + 1800)
 #define BALL_MASS 2.7
 #define BALL_RADIUS 20.0
 
@@ -168,12 +168,12 @@ struct Config {
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed_dynamic = 5;
     const double projectile_coefficient = 0.6;
-    const double velocity_factor_dynamic = 0.45;
+    const double velocity_factor_dynamic = 0.55;
     const double tangent_factor = 1.1 / 7.0;
     const double parameter_e = 0.1;
 
     // paddle position
-    const double paddle_z_left = 250, paddle_z_right = 240; // Paddle heights for left and right sides
+    const double paddle_z_left = 255, paddle_z_right = 245; // Paddle heights for left and right sides
     const double table_height_left = 760, table_height_right = 760;
     const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
     const double jaka_offset_x = 0, jaka_offset_y = -10;
@@ -192,9 +192,13 @@ struct Config {
 
     // STATIC
     // speed
-    const double velocity_factor_static = 43; // velocity shift factor 35.5 for second targets
+    const double velocity_factor_static = 0.65; // velocity shift factor 35.5 for second targets
     const double jaka_speed_static = 150;
     const int jaka_acceleration = 4000;
+
+    const double mid_velocity = 580;
+    const double min_velocity = 470;
+    const double max_velocity = 685;
 
     // Paddle location
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
@@ -205,7 +209,7 @@ struct Config {
     // Adjacent learning
     const bool if_adjacent_learning = true; // if use adjacent learning
     const int offset_class = 1; // 1: , 2: Exponential
-    const double correction_coefficient_y = 0.8, correction_coefficient_x = 0;
+    const double correction_coefficient_y = 0.8, correction_coefficient_x = 0.8;
     const int deviser_x = 100, deviser_y = 200; // Deviser for adjacent learning, used to calculate the distance
     const double fiction_factor = 0.87; // Fiction factor that affects the velocity when ball falling
 
@@ -214,8 +218,8 @@ struct Config {
 
     // target choosing
     const int static_target_choosing_method = 1; // 1 for following order, 2 for solid translation with order, 3 for sensible translation with order, 4 for chunk hitting, 5 for chunk hitting and sensible translation
-    int order_left[10] = { 4, 3, 2, 7, 8, 6, 5, 9, 1 };
-    int order_right[10] = { 2, 3, 4, 7, 6, 8, 1, 9, 5 };
+    int order_left[10] = { 3, 7, 9, 1, 2, 4, 5, 6, 8 };//{ 4, 3, 2, 7, 8, 6, 5, 9, 1 };
+    int order_right[10] = { 1, 7, 9, 1, 2, 4, 5, 6, 8 };//{ 2, 3, 4, 7, 6, 8, 1, 9, 5 };
 } config;
 
 double coming_angle;
@@ -700,7 +704,7 @@ double calculate_leaving_angle(double ball_x, double ball_y, double posi_x, doub
 
     logger(Info, "Calculated leaving angle: ", angle_deg, " degrees.");
 
-    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+    return angle_deg;
 }
 
 double get_distance(double ball_x, double ball_y, double posi_x, double posi_y)
@@ -1162,25 +1166,39 @@ bool if_reach(double ball_x, double ball_y, JointValue& jvalH, Point& target) {
     }
 }
 
+double calculate_hitting_angle_static(double ball_x, double ball_y, double posi_x, double posi_y)
+{
+    double run_x = posi_x - ball_x;
+    double run_y = posi_y - ball_y;
+
+    double angle_rad = atan2(run_y, run_x);
+    double angle_deg = angle_rad * Rad2Deg;
+
+    logger(Info, "Calculated leaving angle: ", angle_deg, " degrees.");
+
+    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+}
+
 // Define the speed based on the ball position
-double define_fake_motor_speed(double ball_x, double ball_y, double target_x, double target_y) {
-    if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
-        logger(Error, "No ball detected!");
-        return 0; // No speed if no ball detected
+double define_motor_speed(double ball_x, double ball_y, double target_x, double target_y) {
+    double y = (target_x - TABLE_LENGTH) * (target_y - ball_y) / (target_x - ball_x);
+    double x = target_x - TABLE_LENGTH;
+    double distance = sqrt(x * x + y * y);
+    double delta = distance - targets[7].first + TABLE_LENGTH;
+    double delta_2 = targets[3].first - targets[7].first;
+    double delta_1 = targets[9].first - targets[7].first;
+    if (delta >= 0)
+    {
+        double speed = (config.max_velocity - config.mid_velocity) * delta / delta_1 + config.mid_velocity;
+        logger(Info, "Motor speed defined: ", speed);
+        return speed;
     }
-
-    // Calculate the speed based on the distance from the center
-    double distance = sqrt(pow(target_x - ball_x, 2) + pow(target_y - ball_y, 2));
-    double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
-
-    double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
-    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right;
-    double flight_time = sqrt(off_table_height);
-
-    double speed = flight_distance / flight_time;
-    double motor_speed = speed * config.velocity_factor_static;
-
-    return motor_speed;
+    else
+    {
+        double speed = (config.min_velocity - config.mid_velocity) * delta / delta_2 + config.mid_velocity;
+        logger(Info, "Motor speed defined: ", speed);
+        return speed;
+    }
 }
 
 bool inverse_ensure(int hitting_distance, int preparing_distance, Adjustment& adjust, double& motor_speed, double ball_x, double ball_y, double hitting_angle)
@@ -1908,7 +1926,7 @@ void static_hit()
     logger(Info, "Target after offset: (", modified_target.x, ", ", modified_target.y, ").");
 
     // calculate the angle to hit the ball
-    hitting_angle = calculate_angle(ball_position.x, ball_position.y, modified_target.x, modified_target.y);
+    hitting_angle = calculate_hitting_angle_static(ball_position.x, ball_position.y, modified_target.x, modified_target.y);
     double hitting_angle_rad = hitting_angle * Deg2Rad;
 
     double ini_angle = -90;
@@ -1917,10 +1935,7 @@ void static_hit()
     Sleep(200);
 
     // Decide the speed based on the ball position
-    double speed = define_fake_motor_speed(ball_position.x, ball_position.y, modified_target.x, modified_target.y);  // A fake speed, containing jaka and motor
-    logger(Info, "Fake speed: ", speed, " degrees/s.");
-    speed -= (double)config.jaka_speed_static;
-    logger(Info, "Motor speed: ", speed, " degrees/s.");
+    double speed = define_motor_speed(ball_position.x, ball_position.y, modified_target.x, modified_target.y);  // A fake speed, containing jaka and motor
 
     joint_hit(config.paddle_ball_center_hitting_distance, ball_x, ball_y, hitting_angle, speed, modified_target);
 
@@ -1950,6 +1965,8 @@ int main()
     {
         offset_file.open(string(config.repo_path) + "\\national\\final\\data_offsets.csv", std::ios::trunc);
         offset_file << "x,y,x_offset,y_offset,point_type" << std::endl;
+        ofstream score_file(string(config.repo_path) + "\\national\\final\\data_score.csv", std::ios::trunc);
+        score_file << "0,0,0,0,0,0,0,0,0," << std::endl;
     }
     else
     {
