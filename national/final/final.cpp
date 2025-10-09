@@ -40,6 +40,8 @@ using std::chrono::milliseconds;
 #define TABLE_LENGTH 2740
 #define TABLE_WIDTH 1525
 #define TABLE_HEIGHT 760
+#define TARGET_RADIUS 50
+#define OFFSET_SCALE (TARGET_RADIUS / 2.3)
 
 #define GRAVITY 9800.0
 #define BALL_MASS 2.7
@@ -99,6 +101,56 @@ std::map<int, std::pair<double, double>> targets = {
 };
 // No, x, y, score
 
+struct Point
+{
+    double x;
+    double y;
+    double t; // time
+};
+
+class TargetChunk
+{
+public:
+    int* target_indices;
+    int size;
+    Point center;
+    TargetChunk(int* indices, int s = 4) : target_indices(indices), size(s)
+    {
+        for (int i = 0; i < size; i++)
+        {
+            int index = target_indices[i];
+            center.x += targets[index].first;
+            center.y += targets[index].second;
+        }
+        center.x /= size;
+        center.y /= size;
+    }
+
+    int targets_not_hit(bool score_[]);
+};
+
+std::vector<TargetChunk> target_chunks = {
+    TargetChunk(new int[4] {2, 3, 6, 7}),
+    TargetChunk(new int[4] {3, 4, 7, 8}),
+    TargetChunk(new int[4] {1, 2, 3, 6}),
+    TargetChunk(new int[4] {2, 3, 4, 7}),
+    TargetChunk(new int[4] {3, 4, 5, 8}),
+    TargetChunk(new int[4] {6, 7, 8, 9})
+};
+
+std::vector<int> neighbors[10] = {
+    {},
+    {2,6},
+    {1,3,6,7},
+    {2,4,7},
+    {3,5,7,8},
+    {4,8},
+    {1,2,7,9},
+    {2,3,4,6,8,9},
+    {4,5,7,9},
+    {6,7,8}
+};
+
 struct Config {
     // config
     char* jaka_ip; // jaka mini ip
@@ -135,7 +187,7 @@ struct Config {
     // IFs
     const bool if_record_trajectory = true; // If record trajectory
     const bool if_vision_correction = false;
-    const int if_difficult_velocity = 2;
+    const int if_complex_velocity = 2;
 
 
     // STATIC
@@ -160,6 +212,8 @@ struct Config {
     const double check_bounce_threshold = 3;
     const double check_bounce_rmse = 7;
 
+    // target choosing
+    const int static_target_choosing_method = 1; // 1 for following order, 2 for solid translation with order, 3 for sensible translation with order, 4 for chunk hitting, 5 for chunk hitting and sensible translation
     int order_left[10] = { 4, 3, 2, 7, 8, 6, 5, 9, 1 };
     int order_right[10] = { 2, 3, 4, 7, 6, 8, 1, 9, 5 };
 } config;
@@ -168,13 +222,6 @@ double coming_angle;
 double coming_velocity;
 double leaving_angle;
 double leaving_velocity;//为了计算速度
-
-struct Point
-{
-    double x;
-    double y;
-    double t; // time
-};
 
 struct Adjustment
 {
@@ -400,7 +447,17 @@ double calculate_angle(double ball_x, double ball_y, double posi_x, double posi_
     return angle_deg;
 }
 
-double calculate_score(Point landing_position) {
+int TargetChunk::targets_not_hit(bool score_[])
+{
+    int num = 0;
+    for (int i = 0; i < size; i++)
+    {
+        if (!score_[target_indices[i]]) num++;
+    }
+    return num;
+}
+
+void calculate_score(Point landing_position) {
     double distance;
     int index;
     for (int i = 1; i <= 9; i++) {
@@ -415,7 +472,6 @@ double calculate_score(Point landing_position) {
     if (distance <= 50) {
         if (score[index]) {
             logger(Info, "Target ", index, " already scored.");
-            return 0;
         }
         else {
             score[index] = true;
@@ -427,16 +483,16 @@ double calculate_score(Point landing_position) {
                 score_file << score[i] << ",";
             }
             score_file << std::endl;
-
-            return 1.0;
         }
     }
-
     else
     {
         logger(Info, "No target hit. Distance to nearest target: ", distance, " mm.");
-        return max(0.0, 5.0 - distance / 100.0); // 每远离目标100mm，扣1分，最低0分
     }
+
+    logger(Info, "Targets not hit: ", score[1] ? "" : "1 ", score[2] ? "" : "2 ", score[3] ? "" : "3 ",
+        score[4] ? "" : "4 ", score[5] ? "" : "5 ", score[6] ? "" : "6 ",
+        score[7] ? "" : "7 ", score[8] ? "" : "8 ", score[9] ? "" : "9 ");
 }
 
 bool is_valid_offset(std::vector<Point>& full_track) {
@@ -753,8 +809,6 @@ std::vector<Point> record_trajectory_before(int maxCount, uint64_t& timeStart, u
             if (count == maxCount)
                 timeEnd = get_current_time_microseconds();
 
-            logger(Info, "Recorded point ", count, ": (", curr.x, " ", curr.y, ") when ", lastT);
-
             if (config.if_record_trajectory) trajectory_outfile << curr.t << "," << curr.x << "," << curr.y << std::endl; // Write to CSV file
         }
         else if (curr.t == lastT) {
@@ -941,7 +995,7 @@ void trajectory_prediction()
 
         target = choose_target();
 
-        leaving_velocity = calculate_leaving_velocity(config.if_difficult_velocity, x, y_predicted, target.x, target.y);
+        leaving_velocity = calculate_leaving_velocity(config.if_complex_velocity, x, y_predicted, target.x, target.y);
         leaving_angle = calculate_leaving_angle(x, y_predicted, target.x, target.y);
         hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
 
@@ -1683,14 +1737,140 @@ Point choose_target()
 {
     if (is_static)
     {
-        for (int i = 0; i < 9; i++)
+        switch (config.static_target_choosing_method)
         {
-            if (!score[order[i]])
+        case 1: // order
+            for (int i = 0; i < 9; i++)
             {
-                logger(Info, "Choose target ", order[i], ".");
-                if (config.is_left)
-                    return { targets[order[i]].first, targets[order[i]].second, 0 };
-                return { targets[order[i]].first, targets[order[i]].second - 760, 0 };
+                if (!score[order[i]])
+                {
+                    logger(Info, "Choose target ", order[i], ".");
+                    return { targets[order[i]].first, targets[order[i]].second - (config.is_left ? 0 : 760), 0 };
+                }
+            }
+        case 2: // solid translation
+            for (int i = 0; i < 9; i++)
+            {
+                if (!score[order[i]])
+                {
+                    logger(Info, "Choose target ", order[i], ".");
+                    double offset_x, offset_y;
+                    switch (i)
+                    {
+                    case 2: case 3: case 4:
+                        offset_x = 2.0 / 3 * TARGET_RADIUS; break;
+                    case 1: case 5:
+                        offset_x = 1.0 / 3 * TARGET_RADIUS; break;
+                    case 6: case 8: case 7: default:
+                        offset_x = 0; break;
+                    case 9:
+                        offset_x = -2.0 / 3 * TARGET_RADIUS; break;
+                    }
+                    switch (i)
+                    {
+                    case 1:
+                        offset_y = -2.0 / 3 * TARGET_RADIUS; break;
+                    case 5:
+                        offset_y = 2.0 / 3 * TARGET_RADIUS; break;
+                    case 2: case 6:
+                        offset_y = -1.0 / 3 * TARGET_RADIUS; break;
+                    case 4: case 8:
+                        offset_y = 1.0 / 3 * TARGET_RADIUS; break;
+                    case 3: case 7: case 9: default:
+                        offset_y = 0; break;
+                    }
+                    return config.is_left ? Point{ targets[order[i]].first + offset_x, targets[order[i]].second + offset_y, 0 } :
+                        Point{ targets[order[i]].first + offset_x, targets[order[i]].second - 760 + offset_y, 0 };
+                }
+            }
+        case 3: // sensible translation
+            for (int i = 0; i < 9; i++) {
+                int id = order[i];
+                if (!score[id]) {
+                    logger(Info, "Choose target ", id, ".");
+
+                    // 计算动态偏移
+                    double dx = 0, dy = 0;
+                    int count = 0;
+                    for (int nb : neighbors[id]) {
+                        if (!score[nb]) {
+                            dx += targets[nb].first - targets[id].first;
+                            dy += targets[nb].second - targets[id].second;
+                            count++;
+                        }
+                    }
+
+                    if (count > 0) {
+                        dx /= count;
+                        dy /= count;
+                        double len = sqrt(dx * dx + dy * dy);
+                        if (len > 1e-6) { // 归一化
+                            dx = dx / len * OFFSET_SCALE;
+                            dy = dy / len * OFFSET_SCALE;
+                        }
+                    }
+
+                    double target_x = targets[id].first + dx;
+                    double target_y = targets[id].second + dy;
+
+                    // 方向镜像（若为左场）
+                    if (!config.is_left)
+                        target_y -= 760;
+
+                    return Point{ target_x, target_y, 0 };
+                }
+            }
+        case 4: case 5: default:
+            int chunk_index = -1;
+            int max_num = -1;
+            for (int i = 0; i < target_chunks.size(); i++)
+            {
+                if (target_chunks[i].targets_not_hit(score) > max_num)
+                {
+                    chunk_index = i;
+                    max_num = target_chunks[i].targets_not_hit(score);
+                }
+            }
+            if (config.static_target_choosing_method == 4 || max_num > 2)
+                return config.is_left ? target_chunks[chunk_index].center : Point{ target_chunks[chunk_index].center.x, target_chunks[chunk_index].center.y - 760, 0 };
+            else
+            {
+                for (int i = 0; i < 9; i++) {
+                    int id = order[i];
+                    if (!score[id]) {
+                        logger(Info, "Choose target ", id, ".");
+
+                        // 计算动态偏移
+                        double dx = 0, dy = 0;
+                        int count = 0;
+                        for (int nb : neighbors[id]) {
+                            if (!score[nb]) {
+                                dx += targets[nb].first - targets[id].first;
+                                dy += targets[nb].second - targets[id].second;
+                                count++;
+                            }
+                        }
+
+                        if (count > 0) {
+                            dx /= count;
+                            dy /= count;
+                            double len = sqrt(dx * dx + dy * dy);
+                            if (len > 1e-6) { // 归一化
+                                dx = dx / len * OFFSET_SCALE;
+                                dy = dy / len * OFFSET_SCALE;
+                            }
+                        }
+
+                        double target_x = targets[id].first + dx;
+                        double target_y = targets[id].second + dy;
+
+                        // 方向镜像（若为左场）
+                        if (!config.is_left)
+                            target_y -= 760;
+
+                        return Point{ target_x, target_y, 0 };
+                    }
+                }
             }
         }
     }
@@ -1763,12 +1943,20 @@ int main()
 {
     read_config();
 
-    read_offsets();
-
-    offset_file.open(string(config.repo_path) + "\\national\\final\\data_offsets.csv", std::ios::trunc);
-    offset_file << "x,y,x_offset,y_offset,point_type" << std::endl;
-
-    read_score();
+    logger(Hint, "Delete history data? (y/n)");
+    char yn;
+    std::cin >> yn;
+    if (yn == 'y')
+    {
+        offset_file.open(string(config.repo_path) + "\\national\\final\\data_offsets.csv", std::ios::trunc);
+        offset_file << "x,y,x_offset,y_offset,point_type" << std::endl;
+    }
+    else
+    {
+        read_offsets();
+        offset_file.open(string(config.repo_path) + "\\national\\final\\data_offsets.csv", std::ios::app);
+        read_score();
+    }
 
     order = config.is_left ? config.order_left : config.order_right;
 
