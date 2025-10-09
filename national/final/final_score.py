@@ -39,11 +39,11 @@ ax.set_aspect('equal', adjustable='box')
 ax.set_xlim(-spacing * 3, spacing * 3)
 ax.set_ylim(-spacing, spacing * 3)
 ax.axis('off')
-plt.title("动态目标得分可视化", fontsize=16)
 
 # ---------- 绘制圆形对象 ----------
 circles = []
 labels = []
+pre_scores = []
 
 for i, (x, y) in enumerate(positions):
     c = patches.Circle((x, y), radius, color='orange')
@@ -56,6 +56,8 @@ for i, (x, y) in enumerate(positions):
 
 # ---------- 更新函数 ----------
 def update(frame):
+    global pre_scores
+
     if not os.path.exists(csv_file):
         print(f"⚠️ 未找到文件 {csv_file}")
         return circles
@@ -70,10 +72,19 @@ def update(frame):
             return circles
 
         for i, c in enumerate(circles):
+            if pre_scores and scores[i] != pre_scores[i]:
+                # 分数变化时闪烁效果
+                for _ in range(2):
+                    c.set_color('yellow')
+                    plt.pause(0.1)
+                    c.set_color('green' if scores[i] == 1 else 'orange')
+                    plt.pause(0.1)
             c.set_color("green" if scores[i] == 1 else "orange")
 
     except Exception as e:
         print("读取文件时出错：", e)
+
+    pre_scores = scores.copy()
 
     return circles
 
