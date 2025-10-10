@@ -177,7 +177,6 @@ struct Config {
     const double table_height_left = 760, table_height_right = 760;
     const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
     const double jaka_offset_x = 0, jaka_offset_y = -10;
-    double jaka_angle_left, jaka_angle_right;
     double moter_speed;
 
     // trajectory prediction
@@ -254,6 +253,7 @@ double y_quadratic_predicted_;
 bool score[10] = { false };
 std::ofstream offset_file;  // 覆盖
 int* order;
+std::array<std::pair<double, double>, 9> initial_offsets;
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
 bool come_from_left = true;
@@ -374,6 +374,7 @@ public:
 
 class AdjacentLearning
 {
+public:
     struct Offset
     {
         int target;
@@ -384,7 +385,6 @@ class AdjacentLearning
     std::array<Offset, 9> offsets;
     std::unordered_map<int, std::vector<std::pair<int, double>>> neighbor_map_;
 
-public:
     AdjacentLearning() {
         for (int i = 0; i < 9; ++i) {
             offsets[i] = { i + 1, 0.0, 0.0 };
@@ -665,7 +665,7 @@ void record_trajectory_after() {
         }
         else
         {
-        	learning.add_offset(target_no, offset_y, offset_x);
+            learning.add_offset(target_no, offset_y, offset_x);
         }
     }
 
@@ -1175,7 +1175,7 @@ double calculate_hitting_angle_static(double ball_x, double ball_y, double posi_
 
     logger(Info, "Calculated leaving angle: ", angle_deg, " degrees.");
 
-    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+    return angle_deg;
 }
 
 // Define the speed based on the ball position
@@ -1659,22 +1659,37 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
 
 void get_correction_data()
 {
-    ifstream angle_file(string(config.repo_path) + "\\national\\final\\data_AngleCorrection.csv");
+    ifstream correction_file(string(config.repo_path) + "\\national\\final\\data_FinalCorrection.csv");
 
-    string line;
-    getline(angle_file, line); // Skip the header line
-    getline(angle_file, line); // Read the first line
+    for (auto& p : initial_offsets) {
+        p = { 0.0, 0.0 };
+    }
 
-    stringstream ss(line);
-    double angle_left, angle_right;
-    ss >> angle_left;
-    ss.ignore(1, ','); // Ignore the comma
-    ss >> angle_right;
+    std::string line;
+    while (std::getline(correction_file, line)) {
+        if (line.empty()) continue;
 
-    config.jaka_angle_left = angle_left;
-    config.jaka_angle_right = angle_right;
+        std::stringstream ss(line);
+        int id;
+        double x_offset, y_offset;
+        ss >> id;
+        ss.ignore(1, ',');
+        ss >> x_offset;
+        ss.ignore(1, ',');
+        ss >> y_offset;
 
-    logger(Info, "Jaka mini paddle angle left: ", config.jaka_angle_left, " degrees, right: ", config.jaka_angle_right, " degrees.");
+        if (id >= 1 && id <= 9) {
+            initial_offsets[id - 1].first += x_offset;
+            initial_offsets[id - 1].second += y_offset;
+        }
+    }
+
+    correction_file.close();
+
+    logger(Info, "[Correction data loaded from CSV]");
+    for (int i = 0; i < 9; ++i) {
+        logger(Info, "Target ", (i + 1), " -> x_offset: ", initial_offsets[i].first, ", y_offset: ", initial_offsets[i].second);
+    }
 }
 
 void read_config()
