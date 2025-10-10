@@ -158,7 +158,7 @@ struct Config {
     char* repo_path;
     bool if_referee;
     const int velocity_calculating_method = 2;//or 2
-    const bool is_left = false;
+    const bool is_left = true;
     const bool is_yellow = true;
 
 
@@ -168,7 +168,7 @@ struct Config {
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed_dynamic = 5;
     const double projectile_coefficient = 0.6;
-    const double velocity_factor_dynamic = 0.55;
+    const double velocity_factor_dynamic = 0.47;
     const double tangent_factor = 1.1 / 7.0;
     const double parameter_e = 0.1;
 
@@ -207,19 +207,19 @@ struct Config {
     const double joint_threshold = 1.0;
 
     // Adjacent learning
-    const bool if_adjacent_learning = true; // if use adjacent learning
-    const int offset_class = 1; // 1: , 2: Exponential
-    const double correction_coefficient_y = 0.8, correction_coefficient_x = 0.8;
-    const int deviser_x = 100, deviser_y = 200; // Deviser for adjacent learning, used to calculate the distance
-    const double fiction_factor = 0.87; // Fiction factor that affects the velocity when ball falling
+    const double primary_learning_rate = 0.6;
+    const double secondary_learning_rate = 0.4;
 
+    // Bounce detection
     const double check_bounce_threshold = 3;
     const double check_bounce_rmse = 7;
 
     // target choosing
     const int static_target_choosing_method = 1; // 1 for following order, 2 for solid translation with order, 3 for sensible translation with order, 4 for chunk hitting, 5 for chunk hitting and sensible translation
-    int order_left[10] = { 3, 7, 9, 1, 2, 4, 5, 6, 8 };//{ 4, 3, 2, 7, 8, 6, 5, 9, 1 };
-    int order_right[10] = { 1, 7, 9, 1, 2, 4, 5, 6, 8 };//{ 2, 3, 4, 7, 6, 8, 1, 9, 5 };
+    int order_static_left[10] = { 7, 3, 9, 4, 2, 8, 6, 5, 1 };
+    int order_static_right[10] = { 7, 3, 9, 2, 4, 6, 8, 1, 5 };
+    int order_dynamic_left[10] = { 7, 4, 2, 8, 6, 3, 5, 9, 1 };
+    int order_dynamic_right[10] = { 7, 2, 4, 6, 8, 3, 1, 9, 5 };
 } config;
 
 double coming_angle;
@@ -253,7 +253,8 @@ JointValue jval, jvalH, inijval;
 double y_quadratic_predicted_;
 bool score[10] = { false };
 std::ofstream offset_file;  // 覆盖
-int* order;
+int* static_order;
+int* dynamic_order;
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
 bool come_from_left = true;
@@ -391,15 +392,15 @@ public:
         }
 
         neighbor_map_ = {
-            {1, {{2, 0.75}, {3, 0.5}, {6, 0.5}, {7, 0.75}}},
-            {2, {{1, 0.75}, {3, 0.75}, {6, 0.5}, {7, 0.75}, {8, 0.5}}},
-            {3, {{1, 0.5}, {2, 0.75}, {4, 0.75}, {7, 0.5}, {8, 0.75}, {9, 0.5}}},
-            {4, {{3, 0.75}, {5, 0.75}, {8, 0.5}, {9, 0.75}}},
-            {5, {{4, 0.75}, {9, 0.5}}},
-            {6, {{1, 0.5}, {2, 0.5}, {7, 0.75}, {8, 0.5}}},
-            {7, {{1, 0.75}, {2, 0.75}, {3, 0.5}, {6, 0.75}, {8, 0.75}, {9, 0.5}}},
-            {8, {{2, 0.5}, {3, 0.75}, {4, 0.5}, {6, 0.5}, {7, 0.75}, {9, 0.75}}},
-            {9, {{3, 0.5}, {4, 0.75}, {5, 0.5}, {7, 0.5}, {8, 0.75}}}
+            {1, {{2, config.primary_learning_rate}, {3, config.secondary_learning_rate}, {6, config.secondary_learning_rate}, {7, config.primary_learning_rate}}},
+            {2, {{1, config.primary_learning_rate}, {3, config.primary_learning_rate}, {6, config.secondary_learning_rate}, {7, config.primary_learning_rate}, {8, config.secondary_learning_rate}}},
+            {3, {{1, config.secondary_learning_rate}, {2, config.primary_learning_rate}, {4, config.primary_learning_rate}, {7, config.secondary_learning_rate}, {8, config.primary_learning_rate}, {9, config.secondary_learning_rate}}},
+            {4, {{3, config.primary_learning_rate}, {5, config.primary_learning_rate}, {8, config.secondary_learning_rate}, {9, config.primary_learning_rate}}},
+            {5, {{4, config.primary_learning_rate}, {9, config.secondary_learning_rate}}},
+            {6, {{1, config.secondary_learning_rate}, {2, config.secondary_learning_rate}, {7, config.primary_learning_rate}, {8, config.secondary_learning_rate}}},
+            {7, {{1, config.primary_learning_rate}, {2, config.primary_learning_rate}, {3, config.secondary_learning_rate}, {6, config.primary_learning_rate}, {8, config.primary_learning_rate}, {9, config.secondary_learning_rate}}},
+            {8, {{2, config.secondary_learning_rate}, {3, config.primary_learning_rate}, {4, config.secondary_learning_rate}, {6, config.secondary_learning_rate}, {7, config.primary_learning_rate}, {9, config.primary_learning_rate}}},
+            {9, {{3, config.secondary_learning_rate}, {4, config.primary_learning_rate}, {5, config.secondary_learning_rate}, {7, config.secondary_learning_rate}, {8, config.primary_learning_rate}}}
         };
     }
     ~AdjacentLearning() = default;
@@ -427,6 +428,17 @@ public:
                 << y_offset << ","
                 << "normal" << std::endl;
         }
+
+        logger(Info, "Current offsets (target, y_offset, x_offset): (",
+            1, ", ", offsets[0].x_offset, ", ", offsets[0].y_offset, "), (",
+            2, ", ", offsets[1].x_offset, ", ", offsets[1].y_offset, "), (",
+            3, ", ", offsets[2].x_offset, ", ", offsets[2].y_offset, "), (",
+            4, ", ", offsets[3].x_offset, ", ", offsets[3].y_offset, "), (",
+            5, ", ", offsets[4].x_offset, ", ", offsets[4].y_offset, "), (",
+            6, ", ", offsets[5].x_offset, ", ", offsets[5].y_offset, "), (",
+            7, ", ", offsets[6].x_offset, ", ", offsets[6].y_offset, "), (",
+            8, ", ", offsets[7].x_offset, ", ", offsets[7].y_offset, "), (",
+            9, ", ", offsets[8].x_offset, ", ", offsets[8].y_offset, ").");
     }
 
     double get_offset_y(const int target) const {
@@ -665,7 +677,7 @@ void record_trajectory_after() {
         }
         else
         {
-        	learning.add_offset(target_no, offset_y, offset_x);
+            learning.add_offset(target_no, offset_y, offset_x);
         }
     }
 
@@ -1754,20 +1766,20 @@ Point choose_target()
         case 1: // order
             for (int i = 0; i < 9; i++)
             {
-                if (!score[order[i]])
+                if (!score[static_order[i]])
                 {
-                    logger(Info, "Choose target ", order[i], ".");
-                    target_no = order[i];
-                    return { targets[order[i]].first, targets[order[i]].second - (config.is_left ? 0 : 760), 0 };
+                    logger(Info, "Choose target ", static_order[i], ".");
+                    target_no = static_order[i];
+                    return { targets[static_order[i]].first, targets[static_order[i]].second - (config.is_left ? 0 : 760), 0 };
                 }
             }
         case 2: // solid translation
             for (int i = 0; i < 9; i++)
             {
-                if (!score[order[i]])
+                if (!score[static_order[i]])
                 {
-                    logger(Info, "Choose target ", order[i], ".");
-                    target_no = order[i];
+                    logger(Info, "Choose target ", static_order[i], ".");
+                    target_no = static_order[i];
                     double offset_x, offset_y;
                     switch (i)
                     {
@@ -1793,13 +1805,13 @@ Point choose_target()
                     case 3: case 7: case 9: default:
                         offset_y = 0; break;
                     }
-                    return config.is_left ? Point{ targets[order[i]].first + offset_x, targets[order[i]].second + offset_y, 0 } :
-                        Point{ targets[order[i]].first + offset_x, targets[order[i]].second - 760 + offset_y, 0 };
+                    return config.is_left ? Point{ targets[static_order[i]].first + offset_x, targets[static_order[i]].second + offset_y, 0 } :
+                        Point{ targets[static_order[i]].first + offset_x, targets[static_order[i]].second - 760 + offset_y, 0 };
                 }
             }
         case 3: // sensible translation
             for (int i = 0; i < 9; i++) {
-                int id = order[i];
+                int id = static_order[i];
                 if (!score[id]) {
                     logger(Info, "Choose target ", id, ".");
                     target_no = id;
@@ -1851,7 +1863,7 @@ Point choose_target()
             else
             {
                 for (int i = 0; i < 9; i++) {
-                    int id = order[i];
+                    int id = static_order[i];
                     if (!score[id]) {
                         logger(Info, "Choose target ", id, ".");
                         target_no = id;
@@ -1892,9 +1904,41 @@ Point choose_target()
     }
     else
     {
-        if (config.is_left)
-            return { targets[7].first - 50, targets[7].second, 0 };
-        return { targets[7].first - 50, targets[7].second - 760, 0 };
+        for (int i = 0; i < 9; i++)
+        {
+            if (!score[dynamic_order[i]])
+            {
+                logger(Info, "Choose target ", dynamic_order[i], ".");
+                target_no = dynamic_order[i];
+                double offset_x, offset_y;
+                switch (i)
+                {
+                case 2: case 3: case 4:
+                    offset_x = 2.0 / 3 * TARGET_RADIUS; break;
+                case 1: case 5:
+                    offset_x = 1.0 / 3 * TARGET_RADIUS; break;
+                case 6: case 8: case 7: default:
+                    offset_x = 0; break;
+                case 9:
+                    offset_x = -2.0 / 3 * TARGET_RADIUS; break;
+                }
+                switch (i)
+                {
+                case 1:
+                    offset_y = -2.0 / 3 * TARGET_RADIUS; break;
+                case 5:
+                    offset_y = 2.0 / 3 * TARGET_RADIUS; break;
+                case 2: case 6:
+                    offset_y = -1.0 / 3 * TARGET_RADIUS; break;
+                case 4: case 8:
+                    offset_y = 1.0 / 3 * TARGET_RADIUS; break;
+                case 3: case 7: case 9: default:
+                    offset_y = 0; break;
+                }
+                return config.is_left ? Point{ targets[dynamic_order[i]].first + offset_x, targets[dynamic_order[i]].second + offset_y, 0 } :
+                    Point{ targets[dynamic_order[i]].first + offset_x, targets[dynamic_order[i]].second - 760 + offset_y, 0 };
+            }
+        }
     }
 }
 
@@ -1973,7 +2017,8 @@ int main()
         read_score();
     }
 
-    order = config.is_left ? config.order_left : config.order_right;
+    static_order = config.is_left ? config.order_static_left : config.order_static_right;
+    dynamic_order = config.is_left ? config.order_dynamic_left : config.order_dynamic_right;
 
     logger(Info, "Main loop started.");
 
