@@ -94,14 +94,16 @@ struct Config {
     char* repo_path;
     bool if_referee;
 
-    bool if_left = false;
+    bool is_left = false;
 
     // Motor speed 
     const double table_height_left = 760, table_height_right = 760;  // table height (left and right). If table is not flat, set the height of the left and right side of the table.
-    const double velocity_factor = 39.5; // velocity shift factor 35.5 for second targets
+    const double mid_velocity = 580;
+    const double min_velocity = 470;
+    const double max_velocity = 685;
 
     // Paddle location
-    const double paddle_z_left = 250, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 255, paddle_z_right = 245; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_distance = 40; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double jaka_offset_x = 0, jaka_offset_y = 0; // offset for jaka mini, used to adjust the paddle position
 
@@ -139,6 +141,7 @@ double angle_left = 0, angle_right = 0;
 std::array<std::pair<double, double>, 9> initial_offsets;
 JAKAZuRobot demo;
 MotorIK mkmotor;
+ofstream offsets_file;
 
 void get_vision();      // vision thread function
 void get_referee();
@@ -162,10 +165,10 @@ ofstream csvfile;
 
 void record_trajectory() {
     // Open the CSV file for writing
-    std::ofstream outfile(string(config.repo_path) + "\\national\\static\\data_trajectory.csv", std::ios::trunc);
+    std::ofstream outfile(string(config.repo_path) + "\\national\\final\\data_trajectory.csv", std::ios::trunc);
     if (config.if_record_trajectory)
     {
-        logger(Info, "CSV path: ", config.repo_path, "\\national\\static\\data_trajectory.csv");
+        logger(Info, "CSV path: ", config.repo_path, "\\national\\final\\data_trajectory.csv");
 
         if (!outfile.is_open()) {
             logger(Error, "Can't open csv file!");
@@ -242,11 +245,17 @@ void record_trajectory() {
         return;
     }
 
-    double x_offset = landing_position.x - target.x;
-    double y_offset = landing_position.y - target.y;
+    Point landing_position_ = landing_position;
+
+    logger(Info, "Landing position: (", landing_position_.x, ", ", landing_position_.y, ").");
+
+    double x_offset = landing_position_.x - target.x;
+    double y_offset = landing_position_.y - target.y;
+
+    logger(Info, "Offset: (", x_offset, ", ", y_offset, ").");
 
     std::vector<int> region_targets;
-    if (target.x > 380) {
+    if (target.y > 380 || (target.y > -380 && target.y < 0)) {
         region_targets = { 1, 2, 3, 6, 7, 9 };
     }
     else {
@@ -258,8 +267,8 @@ void record_trajectory() {
     std::vector<double> inv_dist;
     double dx, dy;
     for (int id : region_targets) {
-        dx = landing_position.x - targets[id].first;
-        dy = landing_position.y - (is_left ? targets[id].second : targets[id].second - 760);
+        dx = landing_position_.x - targets[id].first;
+        dy = landing_position_.y - (config.is_left ? targets[id].second : targets[id].second - 760);
         double d = std::sqrt(dx * dx + dy * dy) + 1e-6;
         distances.push_back(d);
         inv_dist.push_back(1.0 / d);
@@ -268,49 +277,49 @@ void record_trajectory() {
     for (double& w : inv_dist) w /= sum;
 
     // write csv
-    outfile.open(string(config.repo_path) + "\\national\\static\\data_FinalAngle.csv", std::ios::trunc);
     for (size_t i = 0; i < 6; ++i) {
         int id = region_targets[i];
         double w = inv_dist[i];
-        if (outfile.is_open()) {
+        if (offsets_file.is_open()) {
             if (id == 3 || id == 7 || id == 9) {
-                outfile << id << ","
+                offsets_file << id << ","
                     << x_offset * w * 0.5 << ","
                     << y_offset * w * 0.5 << ","
                     << "normal" << std::endl;
             }
             else {
-                outfile << id << ","
+                offsets_file << id << ","
                     << x_offset * w << ","
                     << y_offset * w << ","
                     << "normal" << std::endl;
             }
         }
+        else logger(Error, "Can't open outfile!");
     }
-    logger(Info, )
-    outfile.close(); 
+    outfile.close();
     if (config.if_record_trajectory) logger(Info, "Close file.");
 }
 
 // Define the speed based on the ball position
 double define_motor_speed(double ball_x, double ball_y, double target_x, double target_y) {
-    if (fabs(ball_x) < 0.01 && fabs(ball_y) < 0.01) {
-        logger(Error, "No ball detected!");
-        return 0; // No speed if no ball detected
+    double y = (target_x - TABLE_LENGTH) * (target_y - ball_y) / (target_x - ball_x);
+    double x = target_x - TABLE_LENGTH;
+    double distance = sqrt(x * x + y * y);
+    double delta = distance - targets[7].first + TABLE_LENGTH;
+    double delta_2 = targets[3].first - targets[7].first;
+    double delta_1 = targets[9].first - targets[7].first;
+    if (delta >= 0)
+    {
+        double speed = (config.max_velocity - config.mid_velocity) * delta / delta_1 + config.mid_velocity;
+        logger(Info, "Motor speed defined: ", speed);
+        return speed;
     }
-
-    // Calculate the speed based on the distance from the center
-    double distance = sqrt(pow(target_x - ball_x, 2) + pow(target_y - ball_y, 2));
-    double flight_distance = distance * (target_x - TABLE_LENGTH) / (target_x - ball_x);
-
-    double off_table_y = ball_y + (target_y - ball_y) * (TABLE_LENGTH - ball_x) / (target_x - ball_x);
-    double off_table_height = (TABLE_WIDTH / 2 + off_table_y) * (config.table_height_left - config.table_height_right) / TABLE_WIDTH + config.table_height_right - BUCKET_HEIGHT;
-    double flight_time = sqrt(off_table_height);
-
-    double speed = flight_distance / flight_time;
-    double motor_speed = speed * config.velocity_factor;
-
-    return motor_speed;
+    else
+    {
+        double speed = (config.min_velocity - config.mid_velocity) * delta / delta_2 + config.mid_velocity;
+        logger(Info, "Motor speed defined: ", speed);
+        return speed;
+    }
 }
 
 
@@ -345,6 +354,8 @@ int main()
 {
     read_config();
 
+    offsets_file.open(string(config.repo_path) + "\\national\\final\\data_InitialOffsets.csv", std::ios::trunc);
+
     logger(Info, "Main loop started.");
 
     // Separate thread for vision system
@@ -370,6 +381,7 @@ int main()
     demo.enable_robot();
     logger(Info, "Jaka mini empowered.");
 
+    int hit_round = 1;
 
     mkmotor.ID = 1;               // ID of the motor is 1
     mkmotor.reduceRatio = 10;     // Set the reduction ratio
@@ -393,8 +405,6 @@ int main()
     double ini_dianji_degree = 0;
     mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
 
-    int hit_round = 1;
-
     while (cmd != 'e')
     {
         if (!config.if_referee)
@@ -407,7 +417,7 @@ int main()
 
         landing_position = Point{ 0,0,0,0,0 };
 
-        logger(Info, "Paddle moving.");
+        logger(Info, "Round ", hit_round);
 
         CartesianPose pos;
 
@@ -425,18 +435,20 @@ int main()
         }
         logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
-        if (hit_round == 1){
+        if (hit_round == 1) {
             target.x = (targets[1].first + targets[2].first + targets[3].first + targets[6].first + targets[7].first + targets[9].first) / 6;
             target.y = (targets[1].second + targets[2].second + targets[3].second + targets[6].second + targets[7].second + targets[9].second) / 6;
-            if (is_left) target.y -= 760;
+            if (!config.is_left) target.y -= 760;
             logger(Info, "Choose target: 123679 (", target.x, ", ", target.y, ").");
         }
         else {
             target.x = (targets[3].first + targets[4].first + targets[5].first + targets[7].first + targets[8].first + targets[9].first) / 6;
             target.y = (targets[3].second + targets[4].second + targets[5].second + targets[7].second + targets[8].second + targets[9].second) / 6;
-            if (is_left) target.y -= 760;
+            if (!config.is_left) target.y -= 760;
             logger(Info, "Choose target: 345789 (", target.x, ", ", target.y, ").");
         }
+
+        logger(Info, "Target: (", target.x, ", ", target.y, ").");
 
         // calculate the angle to hit the ball
         hitting_angle = calculate_hitting_angle(hitting_position.x, hitting_position.y, target.x, target.y);
@@ -486,6 +498,8 @@ int main()
             std::thread t2(record_trajectory);
             t2.detach();
         }
+
+        Sleep(1000);
 
         logger(Move, "Jaka mini and motor returning.");
         mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
