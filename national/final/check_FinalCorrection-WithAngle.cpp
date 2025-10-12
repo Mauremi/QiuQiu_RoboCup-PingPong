@@ -95,7 +95,7 @@ struct Config {
     bool if_referee;
     double jaka_angle = 0;
 
-    bool is_left = false;
+    bool is_left = true;
 
     // Motor speed 
     const double table_height_left = 760, table_height_right = 760;  // table height (left and right). If table is not flat, set the height of the left and right side of the table.
@@ -104,7 +104,7 @@ struct Config {
     const double max_velocity = 685;
 
     // Paddle location
-    const double paddle_z_left = 255, paddle_z_right = 245; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 220, paddle_z_right = 245; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_distance = 40; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double jaka_offset_x = 0, jaka_offset_y = 0; // offset for jaka mini, used to adjust the paddle position
 
@@ -251,8 +251,8 @@ void record_trajectory() {
 
     logger(Info, "Landing position: (", landing_position_.x, ", ", landing_position_.y, ").");
 
-    double x_offset = landing_position_.x - target.x;
-    double y_offset = landing_position_.y - target.y;
+    double x_offset = target.x - landing_position_.x;
+    double y_offset = target.y - landing_position_.y;
 
     logger(Info, "Offset: (", x_offset, ", ", y_offset, ").");
 
@@ -263,24 +263,33 @@ void record_trajectory() {
 
         double delta_angle = target_angle - real_angle;
 
-        config.jaka_angle = delta_angle;
+        config.jaka_angle = delta_angle * 0.6;
+
+		logger(Info, "Angle offset: ", delta_angle, " degrees. Jaka angle set to ", config.jaka_angle, " degrees.");
 
         angle_file << delta_angle << std::endl;
     }
     else
     {
-        offsets_file << 7 << ","
-            << x_offset * 0.85 << ","
-            << y_offset * 0.85 << ","
-            << "normal" << std::endl;
-
-        for (int i : {3, 6, 8})
+        for (int i : {6, 7, 8})
             offsets_file << i << ","
-            << x_offset * 0.5 << ","
-            << y_offset * 0.5 << ","
+            << x_offset * 0.75 << ","
+            << y_offset * 0.75 << ","
             << "normal" << std::endl;
 
-        for (int i : {1, 2, 4, 5, 9})
+        for (int i : {2, 3, 4})
+            offsets_file << i << ","
+            << x_offset * 0.8 << ","
+            << y_offset * 0.8 << ","
+            << "normal" << std::endl;
+
+        for (int i : {1, 5})
+            offsets_file << i << ","
+            << x_offset * 0.4 << ","
+            << y_offset * 0.4 << ","
+            << "normal" << std::endl;
+
+        for (int i : {9})
             offsets_file << i << ","
             << x_offset * 0.3 << ","
             << y_offset * 0.3 << ","

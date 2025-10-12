@@ -159,7 +159,7 @@ struct Config {
     bool if_referee;
     double jaka_angle;
     const int velocity_calculating_method = 2;//or 2
-    const bool is_left = true;
+    const bool is_left = false;
     const bool is_yellow = true;
 
 
@@ -393,22 +393,33 @@ public:
         }
 
         neighbor_map_ = {
-            {1, {{2, config.primary_learning_rate}, {3, config.secondary_learning_rate}, {6, config.secondary_learning_rate}, {7, config.primary_learning_rate}}},
-            {2, {{1, config.primary_learning_rate}, {3, config.primary_learning_rate}, {6, config.secondary_learning_rate}, {7, config.primary_learning_rate}, {8, config.secondary_learning_rate}}},
-            {3, {{1, config.secondary_learning_rate}, {2, config.primary_learning_rate}, {4, config.primary_learning_rate}, {7, config.secondary_learning_rate}, {8, config.primary_learning_rate}, {9, config.secondary_learning_rate}}},
-            {4, {{3, config.primary_learning_rate}, {5, config.primary_learning_rate}, {8, config.secondary_learning_rate}, {9, config.primary_learning_rate}}},
-            {5, {{4, config.primary_learning_rate}, {9, config.secondary_learning_rate}}},
-            {6, {{1, config.secondary_learning_rate}, {2, config.secondary_learning_rate}, {7, config.primary_learning_rate}, {8, config.secondary_learning_rate}}},
-            {7, {{1, config.primary_learning_rate}, {2, config.primary_learning_rate}, {3, config.secondary_learning_rate}, {6, config.primary_learning_rate}, {8, config.primary_learning_rate}, {9, config.secondary_learning_rate}}},
-            {8, {{2, config.secondary_learning_rate}, {3, config.primary_learning_rate}, {4, config.secondary_learning_rate}, {6, config.secondary_learning_rate}, {7, config.primary_learning_rate}, {9, config.primary_learning_rate}}},
-            {9, {{3, config.secondary_learning_rate}, {4, config.primary_learning_rate}, {5, config.secondary_learning_rate}, {7, config.secondary_learning_rate}, {8, config.primary_learning_rate}}}
+            {1, {{2, 0.75}, {3, 0.5}, {6, 0.1}}},
+            {2, {{1, 0.75}, {3, 0.75}, {6, 0.2}, {7, 0.1}}},
+            {3, {{1, 0.5}, {2, 0.75}, {4, 0.75}, {5, 0.5}, {6, 0.1}, {7, 0.2}, {8, 0.1}}},
+            {4, {{3, 0.75}, {5, 0.75}, {8, 0.2}, {7, 0.1}}},
+            {5, {{4, 0.75}, {8, 0.1}}},
+            {6, {{1, 0.5}, {2, 0.8}, {3, 0.5}, { 7, 0.75 }, {8, 0.5}, {9, 0.05}}},
+            {7, {{2, 0.5}, {3, 0.8}, {4, 0.5}, { 6, 0.75 }, {8, 0.75}, {9, 0.1}}},
+            {8, {{5, 0.5}, {4, 0.8}, {3, 0.5}, { 7, 0.75 }, {6, 0.5}, {9, 0.05}}},
+            {9, {{6, 0.5}, {7, 0.75}, {8, 0.5}}}
         };
     }
     ~AdjacentLearning() = default;
 
-    void add_offset(const int target, const double y_offset, const double x_offset) {
-        offsets[target - 1].y_offset += y_offset;
-        offsets[target - 1].x_offset += x_offset;
+    void add_offset(const int target, double y_offset, double x_offset) {
+        if (y_offset >= 150 || x_offset >= 100)
+        {
+            if (y_offset >= 250 || x_offset >= 150)
+            {
+                logger(Error, "Invalid landing point! No offset added.");
+                return;
+            }
+            y_offset /= 2;
+            x_offset /= 2;
+        }
+
+        offsets[target - 1].y_offset += y_offset * 0.8;
+        offsets[target - 1].x_offset += x_offset * 0.8;
 
         auto it = neighbor_map_.find(target);
         if (it != neighbor_map_.end()) {
@@ -1013,7 +1024,7 @@ void trajectory_prediction()
         pos.tran.x = x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad) + config.jaka_offset_x;
         pos.tran.y = y_predicted - config.paddle_ball_center_distance * sin(hitting_angle * Deg2Rad) + config.jaka_offset_y;
         pos.tran.z = go_to_left ? config.paddle_z_left : config.paddle_z_right;
-        pos.rpy.rx = go_to_left ? (-90 + hitting_angle) * Deg2Rad : (90 - hitting_angle) * Deg2Rad;
+        pos.rpy.rx = go_to_left ? (-90 + hitting_angle + config.jaka_angle * 0.5) * Deg2Rad : (90 - hitting_angle - config.jaka_angle * 0.5) * Deg2Rad;
         pos.rpy.ry = go_to_left ? -90 * Deg2Rad : 90 * Deg2Rad;
         pos.rpy.rz = 0;
         if (is_hitting) break;
