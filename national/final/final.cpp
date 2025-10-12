@@ -407,9 +407,9 @@ public:
     ~AdjacentLearning() = default;
 
     void add_offset(const int target, double y_offset, double x_offset) {
-        if (y_offset >= 150 || x_offset >= 100)
+        if (abs(y_offset) >= 150 || abs(x_offset) >= 100)
         {
-            if (y_offset >= 250 || x_offset >= 150)
+            if (abs(y_offset) >= 250 || abs(x_offset) >= 150)
             {
                 logger(Error, "Invalid landing point! No offset added.");
                 return;

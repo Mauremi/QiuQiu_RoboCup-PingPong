@@ -177,6 +177,11 @@ public:
 
     // Add an offset for adjacent learning
     void add_offset(const double x, const double y, const double y_offset, const double x_offset) {
+        if (abs(y_offset) >= 150 || abs(x_offset) >= 150)
+        {
+            logger(Error, "Invalid landing position! Offset will not be added.");
+            return;
+        }
         const Offset offset{ {x, y, 0, 0, 0}, y_offset, x_offset };
         offsets_.push_back(offset);
         // write csv
