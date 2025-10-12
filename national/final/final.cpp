@@ -168,12 +168,12 @@ struct Config {
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed_dynamic = 5;
     const double projectile_coefficient = 0.6;
-    const double velocity_factor_dynamic = 0.47;
+    const double velocity_factor_dynamic = 0.43;
     const double tangent_factor = 1.1 / 7.0;
     const double parameter_e = 0.1;
 
     // paddle position
-    const double paddle_z_left = 255, paddle_z_right = 245; // Paddle heights for left and right sides
+    const double paddle_z_left = 225, paddle_z_right = 245; // Paddle heights for left and right sides
     const double table_height_left = 760, table_height_right = 760;
     const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
     const double jaka_offset_x = 0, jaka_offset_y = -10;
@@ -1671,7 +1671,7 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
 
 void get_correction_data()
 {
-    ifstream correction_file(string(config.repo_path) + "\\national\\final\\data_FinalCorrection.csv");
+    ifstream correction_file(string(config.repo_path) + "\\national\\final\\data_InitialOffsets.csv");
 
     for (auto& p : initial_offsets) {
         p = { 0.0, 0.0 };
