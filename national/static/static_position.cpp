@@ -681,7 +681,10 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
             catch (std::runtime_error) {}
 
             bool can_hit = if_reach(ball_x, ball_y, jvalH, target);
-            if (can_hit) return true;
+            if (can_hit) {
+                logger(Info, "paddle move", adjust_length * adjust_round, "mm.");
+                return true;
+            }
         }
     }
     else if (-100 < ball_y < 100)//球在中线
@@ -778,7 +781,10 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
             catch (std::runtime_error) {}
 
             bool can_hit = if_reach(ball_x, ball_y, jvalH, target);
-            if (can_hit) return true;
+            if (can_hit) {
+                logger(Info, "paddle move", adjust_length * adjust_round, "mm.");
+                return true;
+            }
         }
 
     }
@@ -806,7 +812,10 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
             catch (std::runtime_error) {}
 
             bool can_hit = if_reach(ball_x, ball_y, jvalH, target);
-            if (can_hit) return true;
+            if (can_hit) {
+                logger(Info, "paddle move", adjust_length * adjust_round, "mm.");
+                return true;
+            }
         }
     }
     else if (ball_x >= 250) //说明球在上边缘
@@ -833,7 +842,10 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
             catch (std::runtime_error) {}
 
             bool can_hit = if_reach(ball_x, ball_y, jvalH, target);
-            if (can_hit) return true;
+            if (can_hit) {
+                logger(Info, "paddle move", adjust_length * adjust_round, "mm.");
+                return true;
+            }
         }
     }
     logger(Error, "adjust paddle error!");
