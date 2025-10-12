@@ -1072,6 +1072,39 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
         demo.kine_inverse(&jval, &pos, &jvalH);
     }
     catch (std::runtime_error) {
+		logger(Error, "Can't hit this target! Try to hit the other side!");
+        target.y = target.y*(-1);
+
+        double y_offset = ball_y > 0 ? learning_left.get_offset_y(ball_x, ball_y) : learning_right.get_offset_y(ball_x, ball_y);
+        double x_offset = ball_y > 0 ? learning_left.get_offset_x(ball_x, ball_y) : learning_right.get_offset_x(ball_x, ball_y);
+        logger(Info, "Choose target: (", target.x, ", ", target.y, ").");
+
+        Point modified_target = { target.x + x_offset, target.y + y_offset, 0, 0, 0 }; // Apply the offset to the target
+        logger(Info, "Target after offset: (", modified_target.x, ", ", modified_target.y, ").");
+
+        // calculate the angle to hit the ball
+        hitting_angle = calculate_hitting_angle(ball_position.x, ball_position.y, modified_target.x, modified_target.y);
+		hitting_angle_rad = hitting_angle * Deg2Rad;
+
+        pos.tran.x = ball_x - config.paddle_ball_center_hitting_distance * cos(hitting_angle_rad);
+        pos.tran.y = ball_y - config.paddle_ball_center_hitting_distance * sin(hitting_angle_rad);
+        pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
+
+        if (ball_y > 0) {
+            pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+            pos.rpy.ry = -90 * Deg2Rad;
+            pos.rpy.rz = 0;
+        }
+        else {
+            pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+            pos.rpy.ry = 90 * Deg2Rad;
+            pos.rpy.rz = 0;
+        }
+
+        try {
+            demo.kine_inverse(&jval, &pos, &jvalH);
+        }
+        catch (std::runtime_error) {}
         logger(Error, "Can't inverse hitting position!");
     }
 
