@@ -169,12 +169,12 @@ struct Config {
     const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed_dynamic = 5;
     const double projectile_coefficient = 0.6;
-    const double velocity_factor_dynamic = 0.43;
+    const double velocity_factor_dynamic = 0.38;
     const double tangent_factor = 1.1 / 7.0;
     const double parameter_e = 0.1;
 
     // paddle position
-    const double paddle_z_left = 225, paddle_z_right = 245; // Paddle heights for left and right sides
+    const double paddle_z_left = 220, paddle_z_right = 245; // Paddle heights for left and right sides
     const double table_height_left = 760, table_height_right = 760;
     const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
     const double jaka_offset_x = 0, jaka_offset_y = -10;
@@ -196,9 +196,9 @@ struct Config {
     const double jaka_speed_static = 150;
     const int jaka_acceleration = 4000;
 
-    const double mid_velocity = 580;
-    const double min_velocity = 470;
-    const double max_velocity = 685;
+    const double mid_velocity = 290;
+    const double min_velocity = 465;
+    const double max_velocity = 700;
 
     // Paddle location
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
@@ -989,6 +989,10 @@ void trajectory_prediction()
     std::thread full_trajectory(record_full_trajectory);
     full_trajectory.detach();
 
+    Point modified_target(target);
+    modified_target.y += learning.get_offset_y(target_no) * 0.5;
+    modified_target.x += learning.get_offset_x(target_no) * 0.5;
+
     double weight = 1;
 
     while (!is_hitting)
@@ -1016,8 +1020,8 @@ void trajectory_prediction()
         if (is_hitting) break;
         mkmotor.goToPos2(go_to_left ? -160 : -20, 1, 400, false);
 
-        leaving_velocity = calculate_leaving_velocity(config.if_complex_velocity, x, y_predicted, target.x, target.y);
-        leaving_angle = calculate_leaving_angle(x, y_predicted, target.x, target.y);
+        leaving_velocity = calculate_leaving_velocity(config.if_complex_velocity, x, y_predicted, modified_target.x, modified_target.y);
+        leaving_angle = calculate_leaving_angle(x, y_predicted, modified_target.x, modified_target.y);
         hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
 
         CartesianPose pos;
@@ -1100,7 +1104,6 @@ void trajectory_prediction()
 
 void calculate_hit(int round)
 {
-    logger(Info, "Round ", round, " hitting.");
     is_hitting = false;
 
     char dued_cmd = config.is_yellow ? 'k' : 'K';

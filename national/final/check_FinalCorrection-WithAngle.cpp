@@ -99,9 +99,9 @@ struct Config {
 
     // Motor speed 
     const double table_height_left = 760, table_height_right = 760;  // table height (left and right). If table is not flat, set the height of the left and right side of the table.
-    const double mid_velocity = 580;
-    const double min_velocity = 470;
-    const double max_velocity = 685;
+    const double mid_velocity = 290;
+    const double min_velocity = 465;
+    const double max_velocity = 700;
 
     // Paddle location
     const double paddle_z_left = 220, paddle_z_right = 245; // paddle height (when the ball is on the left or right side of the table)
@@ -265,9 +265,9 @@ void record_trajectory() {
 
         config.jaka_angle = delta_angle * 0.6;
 
-		logger(Info, "Angle offset: ", delta_angle, " degrees. Jaka angle set to ", config.jaka_angle, " degrees.");
+        logger(Info, "Angle offset: ", delta_angle, " degrees. Jaka angle set to ", config.jaka_angle, " degrees.");
 
-        angle_file << delta_angle << std::endl;
+        angle_file << delta_angle * 0.6 << std::endl;
     }
     else
     {
