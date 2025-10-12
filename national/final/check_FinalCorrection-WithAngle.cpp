@@ -422,8 +422,7 @@ int main()
         }
         logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
-        target = { targets[7].first, config.is_left ? targets[7].second, targets[7].second - 760, 0 };
-
+        target = { targets[7].first, config.is_left ? targets[7].second : targets[7].second - 760, 0 };
         logger(Info, "Target: (", target.x, ", ", target.y, ").");
 
         // calculate the angle to hit the ball
