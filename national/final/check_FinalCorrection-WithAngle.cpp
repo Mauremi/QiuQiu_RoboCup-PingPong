@@ -135,13 +135,14 @@ int balls_n;
 Point hitting_position;
 Point target;
 double hitting_angle;
+int hitting_round = 0;
 char cmd = 'H'; // Command for the robot
 std::mutex mtx;        // mutex for protecting shared resources
 double angle_left = 0, angle_right = 0;
 std::array<std::pair<double, double>, 9> initial_offsets;
 JAKAZuRobot demo;
 MotorIK mkmotor;
-ofstream offsets_file;
+ofstream offsets_file, angle_file;
 
 void get_vision();      // vision thread function
 void get_referee();
@@ -254,48 +255,34 @@ void record_trajectory() {
 
     logger(Info, "Offset: (", x_offset, ", ", y_offset, ").");
 
-    std::vector<int> region_targets;
-    if (target.y > 380 || (target.y > -380 && target.y < 0)) {
-        region_targets = { 1, 2, 3, 6, 7, 9 };
+    if (hitting_round == 1)
+    {
+        double target_angle = calculate_hitting_angle(hitting_position.x, hitting_position.y, target.x, target.y);
+        double real_angle = calculate_hitting_angle(hitting_position.x, hitting_position.y, landing_position_.x, landing_position_.y);
+
+        double delta_angle = target_angle - real_angle;
+        angle_file << delta_angle << std::endl;
     }
-    else {
-        region_targets = { 3, 4, 5, 7, 8, 9 };
+    else
+    {
+        offsets_file << 7 << ","
+            << x_offset * 0.85 << ","
+            << y_offset * 0.85 << ","
+            << "normal" << std::endl;
+
+        for (int i : {3, 6, 8, 9})
+            offsets_file << i << ","
+            << x_offset * 0.5 << ","
+            << y_offset * 0.5 << ","
+            << "normal" << std::endl;
+
+        for (int i : {1, 2, 4, 5})
+            offsets_file << i << ","
+            << x_offset * 0.3 << ","
+            << y_offset * 0.3 << ","
+            << "normal" << std::endl;
     }
 
-    // calculate weight
-    std::vector<double> distances;
-    std::vector<double> inv_dist;
-    double dx, dy;
-    for (int id : region_targets) {
-        dx = landing_position_.x - targets[id].first;
-        dy = landing_position_.y - (config.is_left ? targets[id].second : targets[id].second - 760);
-        double d = std::sqrt(dx * dx + dy * dy) + 1e-6;
-        distances.push_back(d);
-        inv_dist.push_back(1.0 / d);
-    }
-    double sum = std::accumulate(inv_dist.begin(), inv_dist.end(), 0.0);
-    for (double& w : inv_dist) w /= sum;
-
-    // write csv
-    for (size_t i = 0; i < 6; ++i) {
-        int id = region_targets[i];
-        double w = inv_dist[i];
-        if (offsets_file.is_open()) {
-            if (id == 3 || id == 7 || id == 9) {
-                offsets_file << id << ","
-                    << x_offset * w * 0.5 << ","
-                    << y_offset * w * 0.5 << ","
-                    << "normal" << std::endl;
-            }
-            else {
-                offsets_file << id << ","
-                    << x_offset * w << ","
-                    << y_offset * w << ","
-                    << "normal" << std::endl;
-            }
-        }
-        else logger(Error, "Can't open outfile!");
-    }
     outfile.close();
     if (config.if_record_trajectory) logger(Info, "Close file.");
 }
@@ -355,6 +342,7 @@ int main()
     read_config();
 
     offsets_file.open(string(config.repo_path) + "\\national\\final\\data_InitialOffsets.csv", std::ios::trunc);
+    angle_file.open(string(config.repo_path) + "\\national\\final\\data_AngleCorrection.csv", std::ios::trunc);
 
     logger(Info, "Main loop started.");
 
@@ -380,8 +368,6 @@ int main()
     demo.power_on();
     demo.enable_robot();
     logger(Info, "Jaka mini empowered.");
-
-    int hit_round = 1;
 
     mkmotor.ID = 1;               // ID of the motor is 1
     mkmotor.reduceRatio = 10;     // Set the reduction ratio
@@ -414,10 +400,11 @@ int main()
         }
 
         if (cmd != 'k') continue;
+        hitting_round++;
 
         landing_position = Point{ 0,0,0,0,0 };
 
-        logger(Info, "Round ", hit_round);
+        logger(Info, "Round ", hitting_round);
 
         CartesianPose pos;
 
@@ -435,18 +422,7 @@ int main()
         }
         logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
-        if (hit_round == 1) {
-            target.x = (targets[1].first + targets[2].first + targets[3].first + targets[6].first + targets[7].first + targets[9].first) / 6;
-            target.y = (targets[1].second + targets[2].second + targets[3].second + targets[6].second + targets[7].second + targets[9].second) / 6;
-            if (!config.is_left) target.y -= 760;
-            logger(Info, "Choose target: 123679 (", target.x, ", ", target.y, ").");
-        }
-        else {
-            target.x = (targets[3].first + targets[4].first + targets[5].first + targets[7].first + targets[8].first + targets[9].first) / 6;
-            target.y = (targets[3].second + targets[4].second + targets[5].second + targets[7].second + targets[8].second + targets[9].second) / 6;
-            if (!config.is_left) target.y -= 760;
-            logger(Info, "Choose target: 345789 (", target.x, ", ", target.y, ").");
-        }
+        target = { targets[7].first, config.is_left ? targets[7].second, targets[7].second - 760, 0 };
 
         logger(Info, "Target: (", target.x, ", ", target.y, ").");
 
@@ -507,9 +483,7 @@ int main()
 
         Sleep(900);
 
-
-        logger(Info, "Round ", hit_round, " completed.");
-        hit_round++;
+        logger(Info, "Round ", hitting_round, " completed.");
 
         while (cmd == 'k') {}
     }
