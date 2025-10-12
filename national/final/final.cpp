@@ -157,6 +157,7 @@ struct Config {
     int motor_com; // COM port for the motor
     char* repo_path;
     bool if_referee;
+    double jaka_angle;
     const int velocity_calculating_method = 2;//or 2
     const bool is_left = true;
     const bool is_yellow = true;
@@ -996,19 +997,13 @@ void trajectory_prediction()
 
         if (weight == 1) weight = config.linear_weight_quadratic;
 
-        logger(Info, "Predicted y when x = 200 mm: ", y_predicted, " mm.");
-
         go_to_left = (y_predicted > 0); // Determine if the paddle should go to the left or right based on the predicted y value
         hitting_position = { x, y_predicted, 0 };
 
         JointValue temp;
 
-        logger(Move, "Motor preparing.");
         if (is_hitting) break;
         mkmotor.goToPos2(go_to_left ? -160 : -20, 1, 400, false);
-
-
-        target = choose_target();
 
         leaving_velocity = calculate_leaving_velocity(config.if_complex_velocity, x, y_predicted, target.x, target.y);
         leaving_angle = calculate_leaving_angle(x, y_predicted, target.x, target.y);
@@ -1025,8 +1020,6 @@ void trajectory_prediction()
         try
         {
             demo.kine_inverse(&jval, &pos, &jvalH);
-
-            logger(Move, "Jaka mini first adjustment.");
             ret = demo.joint_move(&jvalH, MoveMode::ABS, false, config.jaka_speed_dynamic, 400 * Deg2Rad, 2, NULL);
             Sleep(200);
         }
@@ -1620,12 +1613,12 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
     pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
     if (ball_y > 0) {
-        pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+        pos.rpy.rx = (-90 + hitting_angle + config.jaka_angle) * Deg2Rad;
         pos.rpy.ry = -90 * Deg2Rad;
         pos.rpy.rz = 0;
     }
     else {
-        pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+        pos.rpy.rx = (90 - hitting_angle - config.jaka_angle) * Deg2Rad;
         pos.rpy.ry = 90 * Deg2Rad;
         pos.rpy.rz = 0;
     }
@@ -1702,6 +1695,14 @@ void get_correction_data()
     for (int i = 0; i < 9; ++i) {
         logger(Info, "Target ", (i + 1), " -> x_offset: ", initial_offsets[i].first, ", y_offset: ", initial_offsets[i].second);
     }
+
+    ifstream angle_file(string(config.repo_path) + "\\national\\final\\data_AngleCorrection.csv");
+
+    std::getline(angle_file, line);
+    std::stringstream ss(line);
+    ss >> config.jaka_angle;
+
+    logger(Info, "Jaka angle correction: ", config.jaka_angle, " degrees.");
 }
 
 void read_config()
@@ -2006,6 +2007,8 @@ void static_hit()
 void dynamic_hit()
 {
     logger(Info, "Round ", hitting_round, ". Dynamic hit started.");
+
+    target = choose_target();
 
     while (!is_ball_moving_toward_robot()) {}
     calculate_hit(hitting_round);

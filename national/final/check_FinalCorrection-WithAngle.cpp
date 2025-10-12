@@ -93,6 +93,7 @@ struct Config {
     int motor_com; // COM port for the motor
     char* repo_path;
     bool if_referee;
+    double jaka_angle = 0;
 
     bool is_left = false;
 
@@ -261,6 +262,9 @@ void record_trajectory() {
         double real_angle = calculate_hitting_angle(hitting_position.x, hitting_position.y, landing_position_.x, landing_position_.y);
 
         double delta_angle = target_angle - real_angle;
+
+        config.jaka_angle = delta_angle;
+
         angle_file << delta_angle << std::endl;
     }
     else
@@ -270,13 +274,13 @@ void record_trajectory() {
             << y_offset * 0.85 << ","
             << "normal" << std::endl;
 
-        for (int i : {3, 6, 8, 9})
+        for (int i : {3, 6, 8})
             offsets_file << i << ","
             << x_offset * 0.5 << ","
             << y_offset * 0.5 << ","
             << "normal" << std::endl;
 
-        for (int i : {1, 2, 4, 5})
+        for (int i : {1, 2, 4, 5, 9})
             offsets_file << i << ","
             << x_offset * 0.3 << ","
             << y_offset * 0.3 << ","
@@ -422,7 +426,11 @@ int main()
         }
         logger(Info, "Ball position: (", ball_x, ", ", ball_y, ").");
 
-        target = { targets[7].first, config.is_left ? targets[7].second : targets[7].second - 760, 0 };
+        if (hitting_round == 1)
+            target = { targets[9].first, config.is_left ? targets[9].second : targets[9].second - 760, 0 };
+        else
+            target = { targets[7].first, config.is_left ? targets[7].second : targets[7].second - 760, 0 };
+
         logger(Info, "Target: (", target.x, ", ", target.y, ").");
 
         // calculate the angle to hit the ball
@@ -434,12 +442,12 @@ int main()
         pos.tran.z = ball_y > 0 ? config.paddle_z_left : config.paddle_z_right;
 
         if (ball_y > 0) {
-            pos.rpy.rx = (-90 + hitting_angle) * Deg2Rad;
+            pos.rpy.rx = (-90 + hitting_angle + config.jaka_angle) * Deg2Rad;
             pos.rpy.ry = -90 * Deg2Rad;
             pos.rpy.rz = 0;
         }
         else {
-            pos.rpy.rx = (90 - hitting_angle) * Deg2Rad;
+            pos.rpy.rx = (90 - hitting_angle - config.jaka_angle) * Deg2Rad;
             pos.rpy.ry = 90 * Deg2Rad;
             pos.rpy.rz = 0;
         }
