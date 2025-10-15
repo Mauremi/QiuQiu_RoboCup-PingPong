@@ -92,8 +92,8 @@ struct Config {
     bool if_referee;
 
     // speed
-    const double velocity_factor = 30; // velocity shift factor 35.5 for second targets
-    const double jaka_speed = 0;
+    const double velocity_factor = 31.5; // velocity shift factor 35.5 for second targets
+    const double jaka_speed = 30;
     const int jaka_acceleration = 4000;
 
     // Motor speed 
@@ -101,11 +101,11 @@ struct Config {
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
 
     // Paddle location
-    const double paddle_z_left = 220, paddle_z_right = 245; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double paddle_ball_center_preparing_distance = 60;
 
-    const double joint_threshold = 0.9;
+    const double joint_threshold = 1;
 
     // Settings (IFs)
     const bool if_record_trajectory = true; // if record trajectory
@@ -343,8 +343,8 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
 {
     target = { Point{ targets[2].first, targets[2].second, 0, 0, 0 } };
     CartesianPose pos;
-    pos.tran.x = ball_x - 20;
-    pos.tran.y = ball_y > 0 ? ball_y - 80 : ball_y + 100;
+    pos.tran.x = ball_x - 18;
+    pos.tran.y = ball_y > 0 ? ball_y - 130 : ball_y + 130;
     pos.tran.z = 95;
     pos.rpy.rx = 180 * Deg2Rad;
     pos.rpy.ry = 0 * Deg2Rad;
@@ -404,11 +404,11 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
     jvalH_hitting.jVal[2] = jvalH.jVal[2];
     jvalH_hitting.jVal[3] = jvalH.jVal[3];
     jvalH_hitting.jVal[4] = jvalH.jVal[4];
-    jvalH_hitting.jVal[5] = jvalH.jVal[5] + 100.0 * pi222 / 180.0;
+    jvalH_hitting.jVal[5] = jvalH.jVal[5] + (ball_y > 0 ? 100.0 : -100.0) * pi222 / 180.0;
 
-    // Sleep(500);
+    Sleep(500);
 
-     //demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180.0);
+    demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180.0);
 
     Sleep(500);
 
@@ -555,7 +555,6 @@ void record_trajectory() {
     }
 
     std::queue<Point> track;  // Vector to store the trajectory points
-    std::vector<Point> full_track;
 
     Point last_ball_pos = { 0, 0, 0, 0, 0 };
 
@@ -599,7 +598,6 @@ void record_trajectory() {
         {
             track.pop();
         }
-        full_track.push_back(current_ball);
 
         // update the last ball position
         last_ball_pos = current_ball;
@@ -612,7 +610,6 @@ void record_trajectory() {
         outfile.close();  // close the file
         return;
     }
-
     LinearPredictor predictor(track); // Create a linear predictor based on the recorded trajectory
 
     double predicted_edge_y = predictor.predict(TABLE_LENGTH); // Predict the y value for the current x position
@@ -636,13 +633,7 @@ void record_trajectory() {
 
     logger(Info, "Offset y: ", offset_y, "; offset x: ", offset_x);
 
-    // if not valid offset, close file and return
-    if (!is_valid_offset(full_track) || full_track.back().x < 250) {
-        logger(Info, "Invalid bounce detected. Offset will not be added.");
-        outfile.close();
-        if (config.if_record_trajectory) logger(Info, "Close file.");
-        return;
-    }
+
 
     if (hitting_position.y > 0) {
         learning_left.add_offset(hitting_position.x, hitting_position.y, offset_y, offset_x);
@@ -992,7 +983,7 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
 
     Sleep(500);
 
-    //demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180);
+    demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180);
 
     Sleep(500);
     mkmotor.goToPos2((ball_y > 0) ? -270 : 90, 0, motor_speed, false); // !DIRECTION

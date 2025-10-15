@@ -86,7 +86,7 @@ struct Config {
     const double speed = 740; // Motor hitting speed
 
     // paddle position
-    const double paddle_z_left = 240, paddle_z_right = 240; // Paddle heights for left and right sides     177
+    const double paddle_z_left = 260, paddle_z_right = 260; // Paddle heights for left and right sides     177
     const double paddle_ball_center_distance = 60; // Distance from paddle center to ball center
 
     // jaka mini position
