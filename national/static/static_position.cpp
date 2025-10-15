@@ -101,7 +101,7 @@ struct Config {
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
 
     // Paddle location
-    const double paddle_z_left = 230, paddle_z_right = 230; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 235, paddle_z_right = 235; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double paddle_ball_center_preparing_distance = 60;
 
@@ -343,7 +343,7 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
 {
     target = { Point{ targets[2].first, targets[2].second, 0, 0, 0 } };
     CartesianPose pos;
-    pos.tran.x = ball_x - (abs(ball_y) >= 250 ? 30 : 20);
+    pos.tran.x = ball_x - (abs(ball_y) >= 250 ? 20 : 15);
     pos.tran.y = ball_y > 0 ? ball_y - 130 : ball_y + 130;
     pos.tran.z = 95;
     pos.rpy.rx = 180 * Deg2Rad;
@@ -424,7 +424,7 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
     Sleep(200);
 
 
-    mkmotor.goToPos2(ball_y > 0 ? -80 : -300, ball_y > 0 ? 0 : 1, 730, false);
+    mkmotor.goToPos2(ball_y > 0 ? -80 : -300, ball_y > 0 ? 0 : 1, 450, false);
 
     jvalH_hitting.jVal[4] = 0;
 

@@ -100,11 +100,11 @@ struct Config {
     // Motor speed 
     const double table_height_left = 760, table_height_right = 760;  // table height (left and right). If table is not flat, set the height of the left and right side of the table.
     const double mid_velocity = 575;
-    const double min_velocity = 465;
+    const double min_velocity = 440;
     const double max_velocity = 675;
 
     // Paddle location
-    const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 230, paddle_z_right = 230; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_distance = 40; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double jaka_offset_x = 0, jaka_offset_y = 0; // offset for jaka mini, used to adjust the paddle position
 

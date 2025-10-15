@@ -292,7 +292,7 @@ void record_trajectory() {
     }
 
     double offset_angle = calculate_hitting_angle(hitting_position.x, hitting_position.y, landing_position.x, landing_position.y) - hitting_angle;
-    logger(Info, "Offset angle:", offset_angle);
+    logger(Info, "Offset angle:", offset_angle * 0.6);
 
     logger(Hint, "Is the angle correct? If yes, enter 'y' to confirm, else enter 'n' to discard this record.");
 
@@ -302,9 +302,9 @@ void record_trajectory() {
     if (hint == 'y')
     {
         if (target.y > 0)
-            angle_right = offset_angle;
+            angle_right = offset_angle * 0.6;
         else
-            angle_left = offset_angle;
+            angle_left = offset_angle * 0.6;
 
         csvfile.open(string(config.repo_path) + "\\national\\static\\data_AngleCorrection.csv", std::ios::trunc);
         csvfile << "left, right\n";
