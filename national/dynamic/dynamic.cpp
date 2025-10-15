@@ -106,19 +106,19 @@ struct Config {
 
     // motor speed
     int speed = 740; // Maximum speed for the motor
-    const int hitting_threshold = 250; // Threshold ball_x to decide when to hit the ball
+    const int hitting_threshold = 170; // Threshold ball_x to decide when to hit the ball
     const int jaka_speed = 5;
-    const double projectile_coefficient = 0.6;
-    const double velocity_factor = 0.81;
-    const double tangent_factor = 12.0 / 7.0;
-    const double parameter_e = 0.55;
+    const double projectile_coefficient = 1;
+    const double velocity_factor = 0.66;
+    const double tangent_factor = 8.0 / 7.0;
+    const double parameter_e = 0.35;
 
     // paddle position
-    const double paddle_z_left = 250, paddle_z_right = 240; // Paddle heights for left and right sides
+    const double paddle_z_left = 235, paddle_z_right = 235; // Paddle heights for left and right sides
     const double table_height_left = 760, table_height_right = 760;
     const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
     const double jaka_offset_x = 0, jaka_offset_y = -10;
-    double jaka_angle_left, jaka_angle_right;
+    double jaka_angle_left = 2, jaka_angle_right = 2;
     double moter_speed;
 
     // trajectory prediction
@@ -156,6 +156,8 @@ double hitting_angle = -10;
 JointValue jval, jvalH, inijval;
 double y_quadratic_predicted_;
 double score = 0;
+
+double ball_y;
 
 bool go_to_left = true; // Flag to determine if the paddle should go to the left or right
 bool come_from_left = true;
@@ -309,7 +311,7 @@ double calculate_leaving_angle(double ball_x, double ball_y, double posi_x, doub
 
     logger(Info, "Calculated leaving angle: ", angle_deg, " degrees.");
 
-    return angle_deg - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
+    return angle_deg;
 }
 
 double get_distance(double ball_x, double ball_y, double posi_x, double posi_y)
@@ -418,7 +420,7 @@ std::vector<Point> record_trajectory_before(int maxCount, uint64_t& timeStart, u
             if (count == maxCount)
                 timeEnd = get_current_time_microseconds();
 
-            logger(Info, "Recorded point ", count, ": (", curr.x, " ", curr.y, ") when ", lastT);
+            //logger(Info, "Recorded point ", count, ": (", curr.x, " ", curr.y, ") when ", lastT);
 
             if (config.if_record_trajectory) trajectory_outfile << curr.t << "," << curr.x << "," << curr.y << std::endl; // Write to CSV file
         }
@@ -647,7 +649,7 @@ double calculate_leaving_velocity(int velocity_calculating_method, double ball_x
     }//空气动力学计算距离
 }
 
-double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle) {
+double calculate_hitting_angle(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double ball_y) {
 
     double numerator = leaving_velocity * std::sin(leaving_angle * Deg2Rad)
         + config.tangent_factor * coming_velocity * std::sin(coming_angle * Deg2Rad);
@@ -655,12 +657,12 @@ double calculate_hitting_angle(double coming_angle, double coming_velocity, doub
         + config.tangent_factor * coming_velocity * std::cos(coming_angle * Deg2Rad);
 
     double phi = std::atan2(numerator, denominator) * Rad2Deg;
-    return phi;
+    return phi - (ball_y > 0 ? config.jaka_angle_left : config.jaka_angle_right);
 }//计算击球角度
 
-double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e) {
+double calculate_hitting_velocity(double coming_angle, double coming_velocity, double leaving_velocity, double leaving_angle, double e, double ball_y) {
 
-    double phi = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
+    double phi = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle, ball_y);
     const double numerator =
         leaving_velocity * std::cos(leaving_angle * Deg2Rad - phi * Deg2Rad)
         - e * coming_velocity * std::cos(phi * Deg2Rad - coming_angle * Deg2Rad);
@@ -723,6 +725,7 @@ void trajectory_prediction()
         double y_linear_predicted = lp.predict(x);
         double y_quadratic_predicted = y_quadratic_predicted_ ? y_linear_predicted : y_quadratic_predicted_;
         double y_predicted = y_linear_predicted * weight + y_quadratic_predicted * (1 - weight);
+        ball_y = y_predicted;
 
         if (weight == 1) weight = config.linear_weight_quadratic;
 
@@ -744,7 +747,7 @@ void trajectory_prediction()
 
         leaving_velocity = calculate_leaving_velocity(config.if_difficult_velocity, x, y_predicted, targets[target_index].first, targets[target_index].second);
         leaving_angle = calculate_leaving_angle(x, y_predicted, targets[target_index].first, targets[target_index].second);
-        hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle);
+        hitting_angle = calculate_hitting_angle(coming_angle, coming_velocity, leaving_velocity, leaving_angle, y_predicted);
 
         CartesianPose pos;
         pos.tran.x = x - config.paddle_ball_center_distance * cos(hitting_angle * Deg2Rad) + config.jaka_offset_x;
@@ -837,7 +840,7 @@ void calculate_hit(int round)
     // hitting!
     while (ball_position.x >= config.hitting_threshold && cmd == 'k') {} // Wait for the ball to reach hitting position
     is_hitting = true;
-    double speed = calculate_hitting_velocity(coming_angle, coming_velocity, leaving_velocity, leaving_angle, config.parameter_e);
+    double speed = calculate_hitting_velocity(coming_angle, coming_velocity, leaving_velocity, leaving_angle, config.parameter_e, ball_y);
     mkmotor.goToPos2(go_to_left ? -270 : 90, 1, speed, false);
     logger(Info, "Calculated motor speed: ", speed);
     logger(Info, "Motor will hit when ball.x is ", ball_position.x);

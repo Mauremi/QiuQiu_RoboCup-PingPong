@@ -101,11 +101,11 @@ struct Config {
     double jaka_angle_left, jaka_angle_right; // Jaka mini angle for left and right side of the table
 
     // Paddle location
-    const double paddle_z_left = 240, paddle_z_right = 240; // paddle height (when the ball is on the left or right side of the table)
+    const double paddle_z_left = 230, paddle_z_right = 230; // paddle height (when the ball is on the left or right side of the table)
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
     const double paddle_ball_center_preparing_distance = 60;
 
-    const double joint_threshold = 1;
+    const double joint_threshold = 0.9;
 
     // Settings (IFs)
     const bool if_record_trajectory = true; // if record trajectory
@@ -343,7 +343,7 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
 {
     target = { Point{ targets[2].first, targets[2].second, 0, 0, 0 } };
     CartesianPose pos;
-    pos.tran.x = ball_x - 18;
+    pos.tran.x = ball_x - (abs(ball_y) >= 250 ? 30 : 20);
     pos.tran.y = ball_y > 0 ? ball_y - 130 : ball_y + 130;
     pos.tran.z = 95;
     pos.rpy.rx = 180 * Deg2Rad;
@@ -379,22 +379,33 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
 
     mkmotor.goToPos2(ball_y > 0 ? -360 : 0, 1, 180, false);
 
-    JointValue jval_temp1;
-    jval_temp1.jVal[0] = jvalH.jVal[0];
+    JointValue jval_temp1, jval_temp2;
+    jval_temp1.jVal[0] = (ball_y > 0 ? 100 : -100) * Deg2Rad;
     jval_temp1.jVal[1] = jvalH.jVal[1];
     jval_temp1.jVal[2] = jvalH.jVal[2];
     jval_temp1.jVal[3] = jvalH.jVal[3];
     jval_temp1.jVal[4] = 0;
     jval_temp1.jVal[5] = jvalH.jVal[5];
 
+
+    jval_temp2.jVal[0] = (ball_y > 0 ? 100 : -100) * Deg2Rad;
+    jval_temp2.jVal[1] = jvalH.jVal[1];
+    jval_temp2.jVal[2] = jvalH.jVal[2];
+    jval_temp2.jVal[3] = jvalH.jVal[3];
+    jval_temp2.jVal[4] = jvalH.jVal[4];
+    jval_temp2.jVal[5] = jvalH.jVal[5];
+
     //伸懒腰
     demo.joint_move(&jval_temp, ABS, true, 2);
 
+    mkmotor.goToPos2(ball_y > 0 ? -135 : -225, 1, 180, false);
+
     demo.joint_move(&jval_temp1, MoveMode::ABS, true, 1);
     Sleep(500);
+
+    demo.joint_move(&jval_temp2, MoveMode::ABS, true, 1);
+
     demo.joint_move(&jvalH, MoveMode::ABS, true, 1);
-    Sleep(2000);
-    mkmotor.goToPos2(-180, 1, 180, false);
     Sleep(1000);
 
     JointValue jvalH_hitting;
@@ -406,11 +417,11 @@ void strange_position(double ball_x, double ball_y, JointValue& jvalH, Point tar
     jvalH_hitting.jVal[4] = jvalH.jVal[4];
     jvalH_hitting.jVal[5] = jvalH.jVal[5] + (ball_y > 0 ? 100.0 : -100.0) * pi222 / 180.0;
 
-    Sleep(500);
+    Sleep(100);
 
     demo.joint_move(&jvalH_hitting, MoveMode::ABS, false, config.jaka_speed * pi222 / 180.0);
 
-    Sleep(500);
+    Sleep(200);
 
 
     mkmotor.goToPos2(ball_y > 0 ? -80 : -300, ball_y > 0 ? 0 : 1, 730, false);
@@ -678,7 +689,7 @@ bool adjust_paddle(double ball_x, double ball_y, CartesianPose& pos, JointValue&
     if (ball_x <= 50) // 说明球在下边缘
         // 拍子落在设定位置的基础上，向击打方向微调，直到逆解成功，在此基础上打出
     {
-        for (adjust_round = 1; adjust_round <= 20; adjust_round++)  // 每次尝试 1mm
+        for (adjust_round = 1; adjust_round <= 30; adjust_round++)  // 每次尝试 1mm
         {
             pos.tran.x = ball_x - config.paddle_ball_center_hitting_distance * cos(hitting_angle_rad) + adjust_length * adjust_round * cos(hitting_angle_rad);
             pos.tran.y = ball_y - config.paddle_ball_center_hitting_distance * sin(hitting_angle_rad) + adjust_length * adjust_round * sin(hitting_angle_rad);
@@ -905,9 +916,10 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
     JointValue jvalH;
     try {
         demo.kine_inverse(&jval, &pos, &jvalH);
+        bool can_reach = if_reach(ball_x, ball_y, jvalH, target);
+        if (!can_reach) throw std::runtime_error("yeah");
     }
     catch (std::runtime_error) {
-
         if (!can_adjust)
         {
             logger(Error, "Can't hit this target! Try to hit the other side!");
@@ -949,25 +961,23 @@ void joint_hit(int hitting_distance, double ball_x, double ball_y, double hittin
             if (!can_adjust)
             {
                 logger(Error, "Can't inverse hitting position!");
+
+                target.y *= -1;
+
+                can_adjust = adjust_paddle(ball_x, ball_y, pos, jval, jvalH, target);
+                logger(Error, can_adjust);
+                if (!can_adjust && -100 < ball_y < 100) {
+                    logger(Info, "222");
+                    mtx.lock();
+                    ball_x = ball_position.x;
+                    ball_y = ball_position.y;
+                    mtx.unlock();
+                    logger(Error, "This position can't reach! Try to use strange position.");
+                    strange_position(ball_x, ball_y, jvalH, target);
+                }
+                return;
             }
         }
-    }
-
-    bool can_reach = if_reach(ball_x, ball_y, jvalH, target);
-    if (!can_reach) {
-        logger(Info, "111");
-        can_adjust = adjust_paddle(ball_x, ball_y, pos, jval, jvalH, target);
-        logger(Error, can_adjust);
-        if (!can_adjust && -100 < ball_y < 100) {
-            logger(Info, "222");
-            mtx.lock();
-            ball_x = ball_position.x;
-            ball_y = ball_position.y;
-            mtx.unlock();
-            logger(Error, "This position can't reach! Try to use strange position.");
-            strange_position(ball_x, ball_y, jvalH, target);
-        }
-        return;
     }
 
     demo.joint_move(&jvalH, MoveMode::ABS, true, 1);
@@ -1162,8 +1172,8 @@ int main()
 
         Sleep(900);
         logger(Move, "Jaka mini and motor returning.");
-        mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
         demo.joint_move(&jval, MoveMode::ABS, true, 7);
+        mkmotor.goToPos2(ini_dianji_degree, 1, 200, false);
 
         logger(Info, "Round ", hit_round, " completed.");
         hit_round++;
