@@ -174,7 +174,7 @@ struct Config {
     const double parameter_e = 0.1;
 
     // paddle position
-    const double paddle_z_left = 235, paddle_z_right = 235; // Paddle heights for left and right sides
+    const double paddle_z_left = 240, paddle_z_right = 240; // Paddle heights for left and right sides
     const double table_height_left = 760, table_height_right = 760;
     const double paddle_ball_center_distance = 10; // Distance from paddle center to ball center
     const double jaka_offset_x = 0, jaka_offset_y = -10;
@@ -196,9 +196,9 @@ struct Config {
     const double jaka_speed_static = 150;
     const int jaka_acceleration = 4000;
 
-    const double mid_velocity = 575;
+    const double mid_velocity = 560;
     const double min_velocity = 465;
-    const double max_velocity = 675;
+    const double max_velocity = 650;
 
     // Paddle location
     const double paddle_ball_center_hitting_distance = 10; // distance between paddle and ball center. Recommended value is 19 mm, which is the radius of the ball.
@@ -418,8 +418,15 @@ public:
             x_offset /= 2;
         }
 
-        offsets[target - 1].y_offset += y_offset * 0.8;
-        offsets[target - 1].x_offset += x_offset * 0.8;
+        if (target != 9)
+        {
+            offsets[target - 1].y_offset += y_offset * 0.8;
+            offsets[target - 1].x_offset += x_offset * 0.8;
+        }
+        else {
+            offsets[target - 1].y_offset += y_offset * 0.4;
+            offsets[target - 1].x_offset += x_offset * 0.4;
+        }
 
         auto it = neighbor_map_.find(target);
         if (it != neighbor_map_.end()) {
